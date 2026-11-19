@@ -238,11 +238,24 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 	}
 
+	let wheelActive = false;
+	let wheelAnchorX = 0;
+	let wheelAnchorY = 0;
+	let wheelX = 0;
+	let wheelY = 0;
+	let lastWheelMs = - Infinity;
+	let restingMouseX = NaN;
+	let restingMouseY = NaN;
+	let preTouchMouseX = NaN;
+	let preTouchMouseY = NaN;
+
 	function onPointerDown( e ) {
 
 		// Ignore taps on HUD controls overlaid above the canvas
 		if ( e.target !== container && ! container.contains( e.target ) ) return;
 
+		wheelActive = false;
+		releaseSlot( 'wheel' );
 		hasUserInteracted = true;
 		lastInteractElapsed = elapsedNow;
 
@@ -284,6 +297,34 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 		const isMouse = e.pointerType === 'mouse';
 		const key = isMouse ? 'mouse' : e.pointerId;
+
+		if ( isMouse ) {
+
+			const now = performance.now();
+			// Ignore macOS touchscreen's automatic cursor snap-back right after a finger-swipe ends
+			if (
+				( now - lastWheelMs ) < 350 &&
+				Number.isFinite( preTouchMouseX ) &&
+				Math.hypot( e.clientX - preTouchMouseX, e.clientY - preTouchMouseY ) < 28
+			) {
+
+				wheelActive = false;
+				return;
+
+			}
+
+			if ( Number.isFinite( restingMouseX ) && Math.hypot( e.clientX - restingMouseX, e.clientY - restingMouseY ) > 12 ) {
+
+				preTouchMouseX = restingMouseX;
+				preTouchMouseY = restingMouseY;
+
+			}
+
+			restingMouseX = e.clientX;
+			restingMouseY = e.clientY;
+			wheelActive = false;
+
+		}
 
 		let slot = findSlotByPointer( key );
 		if ( ! slot && isMouse ) {
@@ -349,11 +390,70 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 	}
 
+	// macOS touchscreen Chrome converts single-finger drags into continuous pixel wheel events
+	// anchored at the touch-start point (deltaX/Y are negative CSS pixels of finger movement).
+	// Leaves iOS multi-touch (no wheel events) and desktop mouse hover/click 100% unchanged.
+	function onWheel( e ) {
+
+		if ( e.ctrlKey || e.deltaMode !== 0 ) return;
+		if ( e.target !== container && ! container.contains( e.target ) ) return;
+		if ( e.cancelable ) e.preventDefault();
+
+		const rect = container.getBoundingClientRect();
+		if ( rect.width <= 0 || rect.height <= 0 ) return;
+
+		// Pause stationary mouse hover slot so the finger swipe owns the coat cleanly
+		releaseSlot( 'mouse' );
+
+		const now = performance.now();
+		const isFreshGesture = ! wheelActive ||
+			( now - lastWheelMs ) > 220 ||
+			Math.hypot( e.clientX - wheelAnchorX, e.clientY - wheelAnchorY ) > 18;
+
+		if ( isFreshGesture ) {
+
+			wheelAnchorX = e.clientX;
+			wheelAnchorY = e.clientY;
+			wheelX = e.clientX;
+			wheelY = e.clientY;
+			wheelActive = true;
+
+		}
+
+		wheelX = Math.max( rect.left, Math.min( rect.right, wheelX - e.deltaX ) );
+		wheelY = Math.max( rect.top, Math.min( rect.bottom, wheelY - e.deltaY ) );
+		lastWheelMs = now;
+
+		const slot = acquireSlot( 'wheel', false );
+		if ( ! slot ) return;
+
+		if ( projectToDogSurface( wheelX, wheelY, hitScratch ) ) {
+
+			slot.targetPos.copy( hitScratch );
+			if ( isFreshGesture || ! slot.active ) {
+
+				slot.pos.copy( hitScratch );
+				slot.prevPos.copy( hitScratch );
+				slot.vel.set( 0, 0, 0 );
+
+			}
+
+			slot.active = true;
+			slot.lastMoveTime = elapsedNow;
+			slot.pressure = 1.28;
+			hasUserInteracted = true;
+			lastInteractElapsed = elapsedNow;
+
+		}
+
+	}
+
 	container.addEventListener( 'pointerdown', onPointerDown );
 	container.addEventListener( 'pointermove', onPointerMove );
 	container.addEventListener( 'pointerup', onPointerUp );
 	container.addEventListener( 'pointercancel', onPointerUp );
 	container.addEventListener( 'pointerleave', onPointerLeave );
+	container.addEventListener( 'wheel', onWheel, { passive: false } );
 
 	engine.trackDisposable( {
 		dispose() {
@@ -363,6 +463,7 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 			container.removeEventListener( 'pointerup', onPointerUp );
 			container.removeEventListener( 'pointercancel', onPointerUp );
 			container.removeEventListener( 'pointerleave', onPointerLeave );
+			container.removeEventListener( 'wheel', onWheel );
 
 		}
 	} );
@@ -419,6 +520,13 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 			if ( slot.isMouse && slot.active && ! mouseDown && ( elapsed - slot.lastMoveTime ) > 2.4 ) {
 
 				slot.active = false;
+
+			}
+
+			// Release macOS touchscreen wheel-swipe slot shortly after the finger lifts
+			if ( slot.pointerId === 'wheel' && slot.active && ( performance.now() - lastWheelMs ) > 180 ) {
+
+				releaseSlot( 'wheel' );
 
 			}
 

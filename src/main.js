@@ -254,13 +254,59 @@ async function mountDemo( name, options = {} ) {
 
 function bindRange( input, readout, format, apply ) {
 
-	input.addEventListener( 'input', () => {
+	let wheelAccum = parseFloat( input.value );
+	let lastWheelMs = - Infinity;
 
-		const v = parseFloat( input.value );
+	const commit = ( v ) => {
+
 		readout.textContent = format( v );
 		apply( v );
 
+	};
+
+	input.addEventListener( 'input', () => {
+
+		const v = parseFloat( input.value );
+		wheelAccum = v;
+		commit( v );
+
 	} );
+
+	// macOS touchscreen Chrome translates single-finger drags into continuous horizontal
+	// wheel events (negative deltaX when dragging right) instead of pointermove.
+	// Only responds to horizontal/diagonal pixel drags (leaves vertical mouse scroll,
+	// mouse click-drag, and iOS touch 100% unchanged).
+	const wheelTarget = input.closest( '.control-row' ) || input;
+	wheelTarget.addEventListener( 'wheel', ( e ) => {
+
+		if ( e.ctrlKey || e.deltaMode !== 0 ) return;
+		if ( Math.abs( e.deltaX ) < 0.01 || Math.abs( e.deltaX ) < Math.abs( e.deltaY ) * 0.5 ) return;
+		if ( e.cancelable ) e.preventDefault();
+		e.stopPropagation();
+
+		const now = performance.now();
+		if ( now - lastWheelMs > 260 ) wheelAccum = parseFloat( input.value );
+		lastWheelMs = now;
+
+		const min = parseFloat( input.min );
+		const max = parseFloat( input.max );
+		const step = parseFloat( input.step ) || 0.01;
+		const trackW = Math.max( 120, input.getBoundingClientRect().width );
+
+		wheelAccum = Math.max( min, Math.min( max, wheelAccum + ( - e.deltaX / trackW ) * ( max - min ) ) );
+
+		const snapped = Math.max( min, Math.min( max, min + Math.round( ( wheelAccum - min ) / step ) * step ) );
+		const decimals = ( String( step ).split( '.' )[ 1 ] || '' ).length;
+		const nextStr = snapped.toFixed( decimals );
+
+		if ( nextStr !== input.value ) {
+
+			input.value = nextStr;
+			commit( parseFloat( nextStr ) );
+
+		}
+
+	}, { passive: false } );
 
 }
 
@@ -377,6 +423,7 @@ function dismissHintSoon() {
 }
 stage.addEventListener( 'pointerdown', dismissHintSoon, { passive: true } );
 stage.addEventListener( 'pointermove', dismissHintSoon, { passive: true } );
+stage.addEventListener( 'wheel', dismissHintSoon, { passive: true } );
 
 // Periodic telemetry update
 setInterval( () => {

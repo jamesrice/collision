@@ -93,10 +93,54 @@ export function createCollider( {
 
 	};
 
-	const onPointerMove = ( event ) => setPointer( event.clientX, event.clientY );
+	let wheelActive = false;
+	let wheelAnchorX = 0;
+	let wheelAnchorY = 0;
+	let wheelX = 0;
+	let wheelY = 0;
+	let lastWheelMs = - Infinity;
+	let restingMouseX = NaN;
+	let restingMouseY = NaN;
+	let preTouchMouseX = NaN;
+	let preTouchMouseY = NaN;
+
+	const onPointerMove = ( event ) => {
+
+		if ( event.pointerType === 'mouse' ) {
+
+			const now = performance.now();
+			// Ignore macOS touchscreen's automatic cursor snap-back right after a finger-swipe ends
+			if (
+				( now - lastWheelMs ) < 350 &&
+				Number.isFinite( preTouchMouseX ) &&
+				Math.hypot( event.clientX - preTouchMouseX, event.clientY - preTouchMouseY ) < 28
+			) {
+
+				wheelActive = false;
+				return;
+
+			}
+
+			if ( Number.isFinite( restingMouseX ) && Math.hypot( event.clientX - restingMouseX, event.clientY - restingMouseY ) > 12 ) {
+
+				preTouchMouseX = restingMouseX;
+				preTouchMouseY = restingMouseY;
+
+			}
+
+			restingMouseX = event.clientX;
+			restingMouseY = event.clientY;
+			wheelActive = false;
+
+		}
+
+		setPointer( event.clientX, event.clientY );
+
+	};
 
 	const onPointerDown = ( event ) => {
 
+		wheelActive = false;
 		setPointer( event.clientX, event.clientY );
 		if ( event.pointerType === 'mouse' || event.pointerType === 'touch' || event.pointerType === 'pen' ) {
 
@@ -112,6 +156,41 @@ export function createCollider( {
 
 	};
 
+	// macOS touchscreen Chrome converts single-finger drags into continuous pixel wheel events
+	// anchored at the touch-start point (deltaX/Y are negative CSS pixels of finger movement).
+	// Leaves iOS touch (no wheel events) and desktop mouse hover/click 100% unchanged.
+	const onWheel = ( event ) => {
+
+		if ( event.ctrlKey || event.deltaMode !== 0 ) return;
+		if ( event.target !== element && ! element.contains( event.target ) ) return;
+		if ( event.cancelable ) event.preventDefault();
+
+		const rect = element.getBoundingClientRect();
+		if ( rect.width <= 0 || rect.height <= 0 ) return;
+
+		const now = performance.now();
+		const isFreshGesture = ! wheelActive ||
+			( now - lastWheelMs ) > 220 ||
+			Math.hypot( event.clientX - wheelAnchorX, event.clientY - wheelAnchorY ) > 18;
+
+		if ( isFreshGesture ) {
+
+			wheelAnchorX = event.clientX;
+			wheelAnchorY = event.clientY;
+			wheelX = event.clientX;
+			wheelY = event.clientY;
+			wheelActive = true;
+
+		}
+
+		wheelX = Math.max( rect.left, Math.min( rect.right, wheelX - event.deltaX ) );
+		wheelY = Math.max( rect.top, Math.min( rect.bottom, wheelY - event.deltaY ) );
+		lastWheelMs = now;
+
+		setPointer( wheelX, wheelY );
+
+	};
+
 	if ( element && mode !== 'custom' ) {
 
 		window.addEventListener( 'pointermove', onPointerMove, { passive: true } );
@@ -119,6 +198,7 @@ export function createCollider( {
 		window.addEventListener( 'pointerup', onPointerUp, { passive: true } );
 		window.addEventListener( 'pointercancel', onPointerUp, { passive: true } );
 		window.addEventListener( 'blur', onPointerUp );
+		element.addEventListener( 'wheel', onWheel, { passive: false } );
 
 	}
 
@@ -314,6 +394,7 @@ export function createCollider( {
 			window.removeEventListener( 'pointerup', onPointerUp );
 			window.removeEventListener( 'pointercancel', onPointerUp );
 			window.removeEventListener( 'blur', onPointerUp );
+			element.removeEventListener( 'wheel', onWheel );
 
 		}
 

@@ -1,6 +1,6 @@
 # WebGPU Interactive Collision Engine (Three.js r187 + TSL)
 
-**Author:** James Rice
+**Author:** James Rice and Google Gemini Neon
 
 A general-purpose **WebGPU + Three.js r187 + TSL** interactive collision and GPU-simulation framework, paired with two complete interactive examples:
 

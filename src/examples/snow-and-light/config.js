@@ -3,7 +3,7 @@
 
 export const SNOW_AND_LIGHT_CONFIG = {
 
-	background: 0x020203,
+	background: 0x020712,
 
 	world: {
 		floorY: - 2.05,
@@ -63,15 +63,44 @@ export const SNOW_AND_LIGHT_CONFIG = {
 			position: [ 7.6, 10.8, - 0.6 ],
 			target: [ - 1.3, - 2.05, - 3.1 ],
 			color: 0xfff1d2,
-			intensity: 900,
+			intensity: 760,
 			angle: 0.17,
 			penumbra: 1.0
 		},
-		fillMagenta: { direction: [ - 0.72, 0.52, 0.46 ], color: 0xff5aa8, intensity: 0.1 },
-		fillTeal: { direction: [ 0.7, - 0.42, 0.58 ], color: 0x45d9cf, intensity: 0.1 },
-		environmentIntensity: 0.12,
+		fillMagenta: { direction: [ - 0.72, 0.52, 0.46 ], color: 0x8e8cff, intensity: 0.11 },
+		fillTeal: { direction: [ 0.7, - 0.42, 0.58 ], color: 0x4dbdff, intensity: 0.16 },
+		environmentIntensity: 0.16,
 		spotOnDust: 0.3,
-		shaft: 0.3
+		shaft: 0.24,
+		deepBlueShafts: [
+			{
+				apex: [ - 6.8, 9.8, - 4.6 ],
+				target: [ 1.6, - 2.05, - 5.2 ],
+				angle: 0.22,
+				color: 0x267aff,
+				rimTint: [ 0.16, 0.46, 1.0 ],
+				strength: 0.34,
+				blurGrowth: 0.36
+			},
+			{
+				apex: [ - 1.6, 10.8, - 4.9 ],
+				target: [ 4.8, - 2.05, - 5.2 ],
+				angle: 0.19,
+				color: 0x52bcff,
+				rimTint: [ 0.24, 0.62, 1.0 ],
+				strength: 0.28,
+				blurGrowth: 0.42
+			},
+			{
+				apex: [ - 9.8, 8.6, - 5.0 ],
+				target: [ - 2.4, - 2.05, - 5.3 ],
+				angle: 0.20,
+				color: 0x1d64e8,
+				rimTint: [ 0.14, 0.42, 0.95 ],
+				strength: 0.24,
+				blurGrowth: 0.40
+			}
+		]
 	},
 
 	post: {

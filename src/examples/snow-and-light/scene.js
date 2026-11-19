@@ -48,6 +48,25 @@ export async function createSnowAndLightExperience( { container, config = SNOW_A
 	const studio = createSnowLightStudio( { scene, renderer, config, orbLight: orbVisuals.light } );
 	engine.trackDisposable( studio );
 
+	const deepBlueShafts = ( config.light.deepBlueShafts || [] ).map( ( cfg ) => {
+
+		const s = createLightShaft( {
+			scene,
+			camera,
+			apex: cfg.apex,
+			target: cfg.target,
+			angle: cfg.angle,
+			color: cfg.color,
+			rimTint: cfg.rimTint,
+			strength: cfg.strength,
+			blurGrowth: cfg.blurGrowth,
+			renderOrder: 1
+		} );
+		engine.trackDisposable( s );
+		return s;
+
+	} );
+
 	const shaft = createLightShaft( {
 		scene,
 		camera,
@@ -55,7 +74,8 @@ export async function createSnowAndLightExperience( { container, config = SNOW_A
 		target: config.light.spot.target,
 		angle: config.light.spot.angle,
 		color: config.light.spot.color,
-		strength: config.light.shaft
+		strength: config.light.shaft,
+		renderOrder: 2
 	} );
 	engine.trackDisposable( shaft );
 
@@ -75,6 +95,8 @@ export async function createSnowAndLightExperience( { container, config = SNOW_A
 
 	engine.onUpdate( () => {
 
+		studio.update( orbVisuals.reveal );
+		for ( const s of deepBlueShafts ) s.update( orbVisuals.reveal );
 		shaft.update( orbVisuals.reveal );
 
 	} );

@@ -1,11 +1,12 @@
 # WebGPU Interactive Collision Engine (Three.js r187 + TSL)
 
-**Author:** James Rice and Google Gemini Neon
+**Author:** James Rice
 
-A general-purpose **WebGPU + Three.js r187 + TSL** interactive collision and GPU-simulation framework, paired with two complete interactive examples:
+A general-purpose **WebGPU + Three.js r187 + TSL** interactive collision and GPU-simulation framework, paired with three complete interactive experiences:
 
-1. **Macro Moss Tree & Dandelion Pappus** *(default)* — A macro-focused gnarled forest tree covered in 32k–145k GPU-simulated moss cushion fronds, swaying sporophytes, rising optical-bokeh spores, and sculpted 3D dandelion pappus parachutes floating in woodland sunbeams. Moving your mouse glides over the 3D bark to brush, ripple, unfurl, and illuminate the moss while swirling dandelion pappus through dipole air wakes.
-2. **Snow & Light** — Tens of thousands of procedural 3D dendritic ice crystals and optical-bokeh frost dust swirling through a volumetric light shaft and colliding with a spring-damped luminous force field.
+1. **Macro Moss Tree & Dandelion Pappus** *(default)* — A macro-focused gnarled forest tree covered in 32k–145k GPU-simulated moss cushion fronds, swaying sporophytes, rising optical-bokeh spores, and sculpted 3D dandelion pappus parachutes floating in woodland sunbeams. Moving your pointer or finger glides over the 3D bark to brush, ripple, unfurl, and illuminate the moss while swirling dandelion pappus through dipole air wakes.
+2. **Snow & Light** — Tens of thousands of procedural 3D dendritic ice crystals and optical-bokeh frost dust swirling before ambiently reflective shimmering frozen glass and deep blue rays, with live Field Mode (`Repel Shield` / `Crystal Vortex`), `Blizzard Drift`, `Frozen Rays`, `Field Radius`, `Frost Gust`, and the `Starlight Hunt` mini-game.
+3. **Petting Fur** — A tactile, touch-first macro view of petting a dog's living double-coat fur (48k–192k GPU-simulated anisotropic strands + sunlit coat motes). Supports multi-touch petting (up to 3 simultaneous fingers) and morphs live on the GPU between **Black Labrador**, **Husky**, and **Bernese Mountain Dog**, with controls for `Touch Pressure`, `Coat Softness`, `Sunbeam Warmth`, `Shake Off`, and `Smooth Coat`.
 
 ---
 
@@ -20,6 +21,7 @@ python3 -m http.server 8080
 Then open in a WebGPU-capable browser (Chrome / Edge / Safari Technology Preview):
 - **Default (Macro Moss & Pappus):** `http://localhost:8080/`
 - **Snow & Light:** `http://localhost:8080/?demo=snow`
+- **Petting Fur:** `http://localhost:8080/?demo=dog` (optional `&breed=labrador|husky|bernese`)
 
 ### Supported URL Flags
 - `?q=low|medium|high|ultra` — Override automatic quality tier
@@ -58,11 +60,16 @@ src/
     │   ├── moss.js                # GPU cushion fronds, sporophytes & scatter-bokeh spores
     │   ├── dandelion.js           # 3D botanical pappus geometry + GPU aerodynamics/collision
     │   └── scene.js
-    └── snow-and-light/            # Snow & Light interactive snowflake & force-field scene
+    ├── snow-and-light/            # Snow & Light frozen-glass snowflakes + Starlight Hunt
+    │   ├── config.js
+    │   ├── studio.js
+    │   ├── orbVisuals.js
+    │   ├── swarm.js
+    │   └── scene.js
+    └── dog-fur/                   # Touch-first macro petting dog fur (Labrador, Husky, Bernese)
         ├── config.js
-        ├── studio.js
-        ├── orbVisuals.js
-        ├── swarm.js
+        ├── body.js                # Curved canine back surface, breed markings & golden bokeh
+        ├── fur.js                 # GPU multi-touch fur physics, Kajiya-Kay shading & motes
         └── scene.js
 ```
 

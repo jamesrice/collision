@@ -107,6 +107,8 @@ export function createSnowLightStudio( { scene, renderer, config, orbLight } ) {
 	} );
 
 	const uReveal = uniform( 0 );
+	const uRayIntensity = uniform( 1.0 );
+	const uGustFlash = uniform( 0.0 );
 	const geometry = buildCyclorama( world );
 	const material = new THREE.MeshStandardNodeMaterial( { metalness: 0 } );
 
@@ -230,10 +232,11 @@ export function createSnowLightStudio( { scene, renderer, config, orbLight } ) {
 		const magicShimmer = mix( vec3( 0.45, 0.80, 1.0 ), vec3( 0.90, 0.96, 1.0 ), shimmerWave )
 			.mul( sparkle ).mul( sparkleMask ).mul( 0.58 );
 
-		const total = transmittedRays.mul( wallness )
-			.add( floorReflection )
-			.add( iceGlaze )
-			.add( magicShimmer );
+		const total = transmittedRays.mul( wallness ).mul( uRayIntensity )
+			.add( floorReflection.mul( uRayIntensity ) )
+			.add( iceGlaze.mul( float( 0.65 ).add( uRayIntensity.mul( 0.35 ) ) ) )
+			.add( magicShimmer.mul( float( 0.55 ).add( uRayIntensity.mul( 0.45 ) ).add( uGustFlash.mul( 1.4 ) ) ) )
+			.add( vec3( 0.22, 0.58, 1.0 ).mul( uGustFlash.mul( 0.22 ).mul( wallness.add( floorness.mul( 0.45 ) ) ) ) );
 
 		return max( total, vec3( 0 ) ).mul( uReveal );
 
@@ -248,9 +251,29 @@ export function createSnowLightStudio( { scene, renderer, config, orbLight } ) {
 	backdrop.frustumCulled = false;
 	scene.add( backdrop );
 
-	function update( reveal = 1 ) {
+	let gustFlash = 0;
+
+	function setRayIntensity( scale ) {
+
+		uRayIntensity.value = THREE.MathUtils.clamp( scale, 0.15, 2.5 );
+
+	}
+
+	function flashGust( strength = 1.0 ) {
+
+		gustFlash = Math.max( gustFlash, strength );
+
+	}
+
+	function update( reveal = 1, dt = 1 / 60 ) {
 
 		uReveal.value = reveal;
+		if ( gustFlash > 0.001 ) {
+
+			gustFlash = Math.max( 0, gustFlash - dt * 1.4 );
+
+		}
+		uGustFlash.value = gustFlash;
 
 	}
 
@@ -263,6 +286,6 @@ export function createSnowLightStudio( { scene, renderer, config, orbLight } ) {
 
 	}
 
-	return { backdrop, rig, environment: envTarget.texture, update, dispose };
+	return { backdrop, rig, environment: envTarget.texture, setRayIntensity, flashGust, update, dispose };
 
 }

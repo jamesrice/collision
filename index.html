@@ -5,13 +5,13 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<meta name="theme-color" content="#050b07">
 	<meta name="author" content="James Rice">
-	<meta name="description" content="Real-time WebGPU + Three.js r187 + TSL interactive collision engine featuring 100k+ GPU moss fronds, floating dandelion pappus, and shimmering ice snowflakes.">
+	<meta name="description" content="Real-time WebGPU + Three.js r187 + TSL interactive collision engine featuring 100k+ GPU moss fronds, frozen-glass snow, and tactile multi-touch dog fur.">
 	<link rel="canonical" href="https://collision.james-0cc.workers.dev/">
 	<meta property="og:type" content="website">
 	<meta property="og:site_name" content="Collision">
 	<meta property="og:url" content="https://collision.james-0cc.workers.dev/">
-	<meta property="og:title" content="Collision — Interactive WebGPU Moss, Pappus &amp; Snow">
-	<meta property="og:description" content="Real-time WebGPU + Three.js r187 + TSL interactive collision engine featuring 100k+ GPU moss fronds, floating dandelion pappus, and shimmering ice snowflakes.">
+	<meta property="og:title" content="Collision — Interactive WebGPU Moss, Snow &amp; Petting Fur">
+	<meta property="og:description" content="Real-time WebGPU + Three.js r187 + TSL interactive collision engine featuring 100k+ GPU moss fronds, frozen-glass snow, and tactile multi-touch dog fur.">
 	<meta property="og:image" content="https://collision.james-0cc.workers.dev/og-cover.jpg">
 	<meta property="og:image:secure_url" content="https://collision.james-0cc.workers.dev/og-cover.jpg">
 	<meta property="og:image:type" content="image/jpeg">
@@ -20,12 +20,12 @@
 	<meta property="og:image:alt" content="Collision interactive WebGPU demo showing a macro mossy tree trunk with floating white dandelion pappus seeds">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:url" content="https://collision.james-0cc.workers.dev/">
-	<meta name="twitter:title" content="Collision — Interactive WebGPU Moss, Pappus &amp; Snow">
-	<meta name="twitter:description" content="Real-time WebGPU + Three.js r187 + TSL interactive collision engine featuring 100k+ GPU moss fronds, floating dandelion pappus, and shimmering ice snowflakes.">
+	<meta name="twitter:title" content="Collision — Interactive WebGPU Moss, Snow &amp; Petting Fur">
+	<meta name="twitter:description" content="Real-time WebGPU + Three.js r187 + TSL interactive collision engine featuring 100k+ GPU moss fronds, frozen-glass snow, and tactile multi-touch dog fur.">
 	<meta name="twitter:image" content="https://collision.james-0cc.workers.dev/og-cover.jpg">
 	<meta name="twitter:image:alt" content="Collision interactive WebGPU demo showing a macro mossy tree trunk with floating white dandelion pappus seeds">
 	<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='12' fill='%23a6ea57'/></svg>">
-	<title>Collision — Interactive WebGPU Moss, Pappus &amp; Snow</title>
+	<title>Collision — Interactive WebGPU Moss, Snow &amp; Petting Fur</title>
 	<style>
 		:root {
 			--bg: #050b07;
@@ -35,6 +35,38 @@
 			--muted: rgba(196, 214, 188, 0.65);
 			--accent: #a6ea57;
 			--accent-warm: #f6dc7a;
+			--accent-soft: rgba(166, 234, 87, 0.22);
+			--accent-hover: rgba(166, 234, 87, 0.14);
+			--accent-border: rgba(166, 234, 87, 0.42);
+			--accent-ink: #0b1409;
+		}
+
+		body.theme-snow {
+			--bg: #020712;
+			--glass: rgba(6, 15, 29, 0.62);
+			--glass-border: rgba(145, 212, 255, 0.18);
+			--text: rgba(232, 245, 255, 0.94);
+			--muted: rgba(176, 208, 236, 0.68);
+			--accent: #74d4ff;
+			--accent-warm: #d4f2ff;
+			--accent-soft: rgba(116, 212, 255, 0.22);
+			--accent-hover: rgba(116, 212, 255, 0.14);
+			--accent-border: rgba(116, 212, 255, 0.46);
+			--accent-ink: #03121e;
+		}
+
+		body.theme-dog {
+			--bg: #0c0907;
+			--glass: rgba(22, 15, 11, 0.64);
+			--glass-border: rgba(242, 206, 162, 0.18);
+			--text: rgba(248, 238, 224, 0.94);
+			--muted: rgba(214, 194, 172, 0.70);
+			--accent: #f2b974;
+			--accent-warm: #ffe0aa;
+			--accent-soft: rgba(242, 185, 116, 0.22);
+			--accent-hover: rgba(242, 185, 116, 0.15);
+			--accent-border: rgba(242, 185, 116, 0.46);
+			--accent-ink: #1a1007;
 		}
 
 		* {
@@ -85,8 +117,9 @@
 			z-index: 10;
 			display: flex;
 			flex-direction: column;
+			align-items: flex-start;
 			gap: 8px;
-			max-width: min(300px, calc(100vw - 32px));
+			max-width: calc(100vw - 32px);
 			pointer-events: none;
 		}
 
@@ -107,6 +140,13 @@
 			align-items: center;
 			gap: 4px;
 			padding: 4px;
+			max-width: calc(100vw - 32px);
+			overflow-x: auto;
+			scrollbar-width: none;
+		}
+
+		.hud-bar::-webkit-scrollbar {
+			display: none;
 		}
 
 		.hud-btn {
@@ -120,6 +160,9 @@
 			padding: 6px 10px;
 			border-radius: 8px;
 			cursor: pointer;
+			white-space: nowrap;
+			flex-shrink: 0;
+			touch-action: manipulation;
 			transition: background 0.18s ease, color 0.18s ease;
 		}
 
@@ -129,7 +172,7 @@
 		}
 
 		.hud-btn[aria-pressed="true"] {
-			color: #0b1409;
+			color: var(--accent-ink);
 			background: var(--accent);
 			font-weight: 600;
 		}
@@ -139,9 +182,11 @@
 			height: 16px;
 			background: var(--glass-border);
 			margin: 0 2px;
+			flex-shrink: 0;
 		}
 
 		.hud-panel {
+			width: min(300px, calc(100vw - 32px));
 			padding: 12px 14px;
 			display: flex;
 			flex-direction: column;
@@ -150,6 +195,16 @@
 		}
 
 		.hud-panel[hidden] {
+			display: none;
+		}
+
+		.scene-controls {
+			display: flex;
+			flex-direction: column;
+			gap: 11px;
+		}
+
+		.scene-controls[hidden] {
 			display: none;
 		}
 
@@ -175,6 +230,7 @@
 			width: 100%;
 			accent-color: var(--accent);
 			cursor: pointer;
+			touch-action: pan-x;
 		}
 
 		.segmented {
@@ -186,19 +242,25 @@
 			border-radius: 8px;
 		}
 
+		.segmented-3 {
+			grid-template-columns: repeat(3, 1fr);
+		}
+
 		.segmented button {
 			appearance: none;
 			border: 0;
 			background: transparent;
 			color: var(--muted);
-			font-size: 11px;
-			padding: 5px 8px;
+			font-size: 12px;
+			padding: 5px 6px;
 			border-radius: 6px;
 			cursor: pointer;
+			touch-action: manipulation;
+			transition: background 0.16s ease, color 0.16s ease;
 		}
 
 		.segmented button[aria-pressed="true"] {
-			background: rgba(166, 234, 87, 0.22);
+			background: var(--accent-soft);
 			color: var(--accent);
 			font-weight: 600;
 		}
@@ -214,29 +276,30 @@
 			border: 1px solid var(--glass-border);
 			background: rgba(255, 255, 255, 0.05);
 			color: var(--text);
-			font-size: 11.5px;
+			font-size: 12px;
 			font-weight: 500;
 			padding: 7px 10px;
 			border-radius: 8px;
 			cursor: pointer;
+			touch-action: manipulation;
 			transition: background 0.16s ease, border-color 0.16s ease;
 		}
 
 		.action-btn:hover {
-			background: rgba(166, 234, 87, 0.14);
-			border-color: rgba(166, 234, 87, 0.42);
+			background: var(--accent-hover);
+			border-color: var(--accent-border);
 		}
 
 		.action-btn.is-active {
-			background: rgba(246, 220, 122, 0.2);
-			border-color: rgba(246, 220, 122, 0.55);
+			background: var(--accent-soft);
+			border-color: var(--accent-border);
 			color: var(--accent-warm);
 		}
 
 		.stats-line {
 			display: flex;
 			justify-content: space-between;
-			font-size: 11px;
+			font-size: 12px;
 			color: var(--muted);
 			padding-top: 8px;
 			border-top: 1px solid var(--glass-border);
@@ -274,11 +337,11 @@
 			z-index: 9;
 			padding: 8px 16px;
 			border-radius: 999px;
-			background: rgba(8, 14, 10, 0.54);
-			border: 1px solid rgba(188, 232, 168, 0.16);
+			background: var(--glass);
+			border: 1px solid var(--glass-border);
 			backdrop-filter: blur(10px);
 			-webkit-backdrop-filter: blur(10px);
-			color: rgba(230, 242, 222, 0.84);
+			color: var(--text);
 			font-size: 12px;
 			letter-spacing: 0.02em;
 			pointer-events: none;
@@ -372,7 +435,7 @@
 			padding: 10px;
 			border-radius: 8px;
 			background: rgba(0, 0, 0, 0.4);
-			font-size: 11px;
+			font-size: 12px;
 			overflow-x: auto;
 			color: var(--muted);
 			white-space: pre-wrap;
@@ -395,6 +458,111 @@
 		.loader.is-hidden {
 			opacity: 0;
 		}
+
+		/* Touch-first ergonomics: generous 44px tap targets & thumb-friendly sliders */
+		@media (pointer: coarse) {
+			.hud {
+				top: max(12px, env(safe-area-inset-top));
+				left: max(12px, env(safe-area-inset-left));
+				max-width: calc(100vw - 24px);
+			}
+
+			.hud-bar {
+				max-width: calc(100vw - 24px);
+				padding: 5px;
+				gap: 5px;
+			}
+
+			.hud-btn {
+				min-height: 44px;
+				padding: 10px 13px;
+				font-size: 13px;
+			}
+
+			.hud-panel {
+				width: min(332px, calc(100vw - 24px));
+				padding: 14px 16px;
+				gap: 14px;
+				font-size: 13px;
+			}
+
+			.scene-controls {
+				gap: 14px;
+			}
+
+			.segmented button {
+				min-height: 44px;
+				font-size: 12.5px;
+				padding: 10px 8px;
+			}
+
+			.action-btn {
+				min-height: 44px;
+				font-size: 13px;
+				padding: 10px 12px;
+			}
+
+			.control-row input[type="range"] {
+				height: 30px;
+			}
+
+			.control-row input[type="range"]::-webkit-slider-thumb {
+				-webkit-appearance: none;
+				width: 22px;
+				height: 22px;
+				border-radius: 50%;
+				background: var(--accent);
+				box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+			}
+
+			.control-row input[type="range"]::-moz-range-thumb {
+				width: 22px;
+				height: 22px;
+				border: 0;
+				border-radius: 50%;
+				background: var(--accent);
+				box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+			}
+		}
+
+		@media (max-width: 600px) {
+			.hud {
+				left: 10px;
+				right: 10px;
+				max-width: none;
+			}
+
+			.hud-bar {
+				width: 100%;
+				max-width: none;
+				justify-content: space-between;
+				gap: 2px;
+				padding: 4px;
+			}
+
+			.hud-btn {
+				padding: 10px 7px;
+				font-size: 12px;
+			}
+
+			.hud-divider {
+				margin: 0 1px;
+			}
+
+			.hud-panel {
+				width: 100%;
+			}
+
+			.hint {
+				white-space: normal;
+				text-align: center;
+				max-width: calc(100vw - 92px);
+				left: 16px;
+				transform: none;
+				bottom: max(16px, env(safe-area-inset-bottom));
+				font-size: 12px;
+			}
+		}
 	</style>
 	<script type="importmap">
 		{
@@ -415,12 +583,13 @@
 		<div class="hud-bar">
 			<button id="btn-demo-moss" class="hud-btn" type="button" aria-pressed="true">Moss &amp; Pappus</button>
 			<button id="btn-demo-snow" class="hud-btn" type="button" aria-pressed="false">Snow &amp; Light</button>
+			<button id="btn-demo-dog" class="hud-btn" type="button" aria-pressed="false">Petting Fur</button>
 			<span class="hud-divider" aria-hidden="true"></span>
 			<button id="btn-toggle-panel" class="hud-btn" type="button" aria-expanded="false" aria-controls="hud-panel">Controls</button>
 		</div>
 
 		<section id="hud-panel" class="hud-panel" hidden>
-			<div id="moss-only-controls" style="display: flex; flex-direction: column; gap: 11px;">
+			<div id="moss-only-controls" class="scene-controls">
 				<div class="control-row">
 					<div class="control-header"><strong>Macro Focus</strong></div>
 					<div class="segmented">
@@ -459,6 +628,85 @@
 				</div>
 			</div>
 
+			<div id="snow-only-controls" class="scene-controls" hidden>
+				<div class="control-row">
+					<div class="control-header"><strong>Field Mode</strong></div>
+					<div class="segmented">
+						<button id="btn-snow-repel" type="button" aria-pressed="true">Repel Shield</button>
+						<button id="btn-snow-vortex" type="button" aria-pressed="false">Crystal Vortex</button>
+					</div>
+				</div>
+
+				<div class="control-row">
+					<div class="control-header">
+						<strong>Blizzard Drift</strong>
+						<span id="val-snow-drift">1.0x</span>
+					</div>
+					<input id="range-snow-drift" type="range" min="0.2" max="2.4" step="0.05" value="1">
+				</div>
+
+				<div class="control-row">
+					<div class="control-header">
+						<strong>Frozen Rays</strong>
+						<span id="val-snow-rays">1.0x</span>
+					</div>
+					<input id="range-snow-rays" type="range" min="0.2" max="2.4" step="0.05" value="1">
+				</div>
+
+				<div class="control-row">
+					<div class="control-header">
+						<strong>Field Radius</strong>
+						<span id="val-snow-radius">1.0x</span>
+					</div>
+					<input id="range-snow-radius" type="range" min="0.6" max="2.0" step="0.05" value="1">
+				</div>
+
+				<div class="action-row">
+					<button id="btn-snow-gust" class="action-btn" type="button">Frost Gust</button>
+					<button id="btn-snow-game" class="action-btn" type="button" aria-pressed="false">Starlight Hunt</button>
+				</div>
+			</div>
+
+			<div id="dog-only-controls" class="scene-controls" hidden>
+				<div class="control-row">
+					<div class="control-header"><strong>Dog Fur</strong></div>
+					<div class="segmented segmented-3">
+						<button id="btn-dog-labrador" type="button" aria-pressed="true">Black Lab</button>
+						<button id="btn-dog-husky" type="button" aria-pressed="false">Husky</button>
+						<button id="btn-dog-bernese" type="button" aria-pressed="false">Bernese</button>
+					</div>
+				</div>
+
+				<div class="control-row">
+					<div class="control-header">
+						<strong>Touch Pressure</strong>
+						<span id="val-dog-pressure">1.0x</span>
+					</div>
+					<input id="range-dog-pressure" type="range" min="0.4" max="2.0" step="0.05" value="1">
+				</div>
+
+				<div class="control-row">
+					<div class="control-header">
+						<strong>Coat Softness</strong>
+						<span id="val-dog-softness">1.0x</span>
+					</div>
+					<input id="range-dog-softness" type="range" min="0.2" max="2.0" step="0.05" value="1">
+				</div>
+
+				<div class="control-row">
+					<div class="control-header">
+						<strong>Sunbeam Warmth</strong>
+						<span id="val-dog-warmth">1.0x</span>
+					</div>
+					<input id="range-dog-warmth" type="range" min="0.3" max="2.0" step="0.05" value="1">
+				</div>
+
+				<div class="action-row">
+					<button id="btn-dog-shake" class="action-btn" type="button">Shake Off</button>
+					<button id="btn-dog-smooth" class="action-btn" type="button">Smooth Coat</button>
+				</div>
+			</div>
+
 			<div class="stats-line">
 				<span id="stat-backend">initializing…</span>
 				<span id="stat-fps">-- fps</span>
@@ -468,7 +716,7 @@
 	</aside>
 
 	<div id="score-pill" class="score-pill" hidden>
-		<span>Bloom Hunt</span>
+		<span id="score-label">Bloom Hunt</span>
 		<span class="score-value" id="score-val">0</span>
 		<span id="combo-val" style="color: var(--muted);">x1</span>
 	</div>
@@ -556,6 +804,6 @@
 
 		} )();
 	</script>
-	<script type="module" src="./src/main.js?v=3"></script>
+	<script type="module" src="./src/main.js?v=4"></script>
 </body>
 </html>

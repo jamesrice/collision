@@ -1,42 +1,100 @@
 import { parseRuntimeFlags } from './engine/index.js';
 import { createMossTreeExperience } from './examples/moss-tree/scene.js';
 import { createSnowAndLightExperience } from './examples/snow-and-light/scene.js';
+import { createDogFurExperience } from './examples/dog-fur/scene.js';
 
 window.__appBooted = true;
 
-const stage = document.getElementById( 'stage' );
-const btnMoss = document.getElementById( 'btn-demo-moss' );
-const btnSnow = document.getElementById( 'btn-demo-snow' );
-const btnPanel = document.getElementById( 'btn-toggle-panel' );
-const panel = document.getElementById( 'hud-panel' );
-const mossOnlyControls = document.getElementById( 'moss-only-controls' );
+const $ = ( id ) => document.getElementById( id );
 
-const btnFocusMoss = document.getElementById( 'btn-focus-moss' );
-const btnFocusPointer = document.getElementById( 'btn-focus-pointer' );
-const rangeFocus = document.getElementById( 'range-focus' );
-const valFocus = document.getElementById( 'val-focus' );
-const rangeWind = document.getElementById( 'range-wind' );
-const valWind = document.getElementById( 'val-wind' );
-const rangeGlow = document.getElementById( 'range-glow' );
-const valGlow = document.getElementById( 'val-glow' );
-const btnPulse = document.getElementById( 'btn-pulse' );
-const btnGame = document.getElementById( 'btn-game' );
+const stage = $( 'stage' );
+const btnPanel = $( 'btn-toggle-panel' );
+const panel = $( 'hud-panel' );
+const themeMeta = document.querySelector( 'meta[name="theme-color"]' );
 
-const scorePill = document.getElementById( 'score-pill' );
-const scoreVal = document.getElementById( 'score-val' );
-const comboVal = document.getElementById( 'combo-val' );
-const hint = document.getElementById( 'hint' );
+const scorePill = $( 'score-pill' );
+const scoreLabel = $( 'score-label' );
+const scoreVal = $( 'score-val' );
+const comboVal = $( 'combo-val' );
+const hint = $( 'hint' );
 
-const statBackend = document.getElementById( 'stat-backend' );
-const statFps = document.getElementById( 'stat-fps' );
-const statBodies = document.getElementById( 'stat-bodies' );
+const statBackend = $( 'stat-backend' );
+const statFps = $( 'stat-fps' );
+const statBodies = $( 'stat-bodies' );
 
-const errorBanner = document.getElementById( 'error-banner' );
-const errorDetail = document.getElementById( 'error-detail' );
+const errorBanner = $( 'error-banner' );
+const errorDetail = $( 'error-detail' );
+
+const DEMOS = {
+	moss: {
+		btn: $( 'btn-demo-moss' ),
+		controls: $( 'moss-only-controls' ),
+		themeClass: 'theme-moss',
+		themeColor: '#050b07',
+		hideCursor: false,
+		hint: 'Move pointer or drag to awaken the moss & swirl pappus · Hold to pulse'
+	},
+	snow: {
+		btn: $( 'btn-demo-snow' ),
+		controls: $( 'snow-only-controls' ),
+		themeClass: 'theme-snow',
+		themeColor: '#020712',
+		hideCursor: true,
+		hint: 'Sweep pointer or finger through the snow · Hold to swell the field'
+	},
+	dog: {
+		btn: $( 'btn-demo-dog' ),
+		controls: $( 'dog-only-controls' ),
+		themeClass: 'theme-dog',
+		themeColor: '#0c0907',
+		hideCursor: false,
+		hint: 'Pet slowly with one or more fingers to comb & part the coat'
+	}
+};
+
+// Moss controls
+const btnFocusMoss = $( 'btn-focus-moss' );
+const btnFocusPointer = $( 'btn-focus-pointer' );
+const rangeFocus = $( 'range-focus' );
+const valFocus = $( 'val-focus' );
+const rangeWind = $( 'range-wind' );
+const valWind = $( 'val-wind' );
+const rangeGlow = $( 'range-glow' );
+const valGlow = $( 'val-glow' );
+const btnPulse = $( 'btn-pulse' );
+const btnGame = $( 'btn-game' );
+
+// Snow & Light controls
+const btnSnowRepel = $( 'btn-snow-repel' );
+const btnSnowVortex = $( 'btn-snow-vortex' );
+const rangeSnowDrift = $( 'range-snow-drift' );
+const valSnowDrift = $( 'val-snow-drift' );
+const rangeSnowRays = $( 'range-snow-rays' );
+const valSnowRays = $( 'val-snow-rays' );
+const rangeSnowRadius = $( 'range-snow-radius' );
+const valSnowRadius = $( 'val-snow-radius' );
+const btnSnowGust = $( 'btn-snow-gust' );
+const btnSnowGame = $( 'btn-snow-game' );
+
+// Dog Fur controls
+const breedButtons = {
+	labrador: $( 'btn-dog-labrador' ),
+	husky: $( 'btn-dog-husky' ),
+	bernese: $( 'btn-dog-bernese' )
+};
+const rangeDogPressure = $( 'range-dog-pressure' );
+const valDogPressure = $( 'val-dog-pressure' );
+const rangeDogSoftness = $( 'range-dog-softness' );
+const valDogSoftness = $( 'val-dog-softness' );
+const rangeDogWarmth = $( 'range-dog-warmth' );
+const valDogWarmth = $( 'val-dog-warmth' );
+const btnDogShake = $( 'btn-dog-shake' );
+const btnDogSmooth = $( 'btn-dog-smooth' );
 
 let currentDemo = null;
 let currentName = 'moss';
 let switching = false;
+let hintTimer = null;
 
 function showError( err ) {
 
@@ -45,30 +103,57 @@ function showError( err ) {
 
 }
 
-function updateDemoButtons( name ) {
+function setSegmentedActive( buttons, activeBtn ) {
 
-	btnMoss.setAttribute( 'aria-pressed', String( name === 'moss' ) );
-	btnSnow.setAttribute( 'aria-pressed', String( name === 'snow' ) );
-	mossOnlyControls.style.display = name === 'moss' ? 'flex' : 'none';
-	stage.classList.toggle( 'cursor-hidden', name === 'snow' );
+	for ( const b of buttons ) {
 
-	if ( name === 'moss' ) {
-
-		hint.textContent = 'Move pointer to awaken the moss & swirl dandelion pappus · Hold click to pulse';
-
-	} else {
-
-		hint.textContent = 'Move pointer to sweep the light through the snow · Hold click to swell the force field';
-		scorePill.hidden = true;
+		b.setAttribute( 'aria-pressed', String( b === activeBtn ) );
 
 	}
 
 }
 
+function handleScoreChange( { score, combo, active, label } ) {
+
+	if ( label ) scoreLabel.textContent = label;
+	scorePill.hidden = ! active;
+	scoreVal.textContent = String( score );
+	comboVal.textContent = `x${ Math.max( 1, combo ) }`;
+
+}
+
+function showHint( text ) {
+
+	hint.textContent = text;
+	hint.classList.remove( 'is-hidden' );
+	if ( hintTimer ) clearTimeout( hintTimer );
+	hintTimer = setTimeout( () => hint.classList.add( 'is-hidden' ), 4800 );
+
+}
+
+function updateDemoUI( name ) {
+
+	const spec = DEMOS[ name ] || DEMOS.moss;
+	document.body.classList.remove( 'theme-moss', 'theme-snow', 'theme-dog' );
+	document.body.classList.add( spec.themeClass );
+	if ( themeMeta ) themeMeta.setAttribute( 'content', spec.themeColor );
+
+	for ( const [ key, def ] of Object.entries( DEMOS ) ) {
+
+		def.btn.setAttribute( 'aria-pressed', String( key === name ) );
+		def.controls.hidden = key !== name;
+
+	}
+
+	stage.classList.toggle( 'cursor-hidden', spec.hideCursor );
+	scorePill.hidden = true;
+	showHint( spec.hint );
+
+}
+
 function resetMossControlUI() {
 
-	btnFocusMoss.setAttribute( 'aria-pressed', 'true' );
-	btnFocusPointer.setAttribute( 'aria-pressed', 'false' );
+	setSegmentedActive( [ btnFocusMoss, btnFocusPointer ], btnFocusMoss );
 	rangeFocus.value = '0';
 	valFocus.textContent = '0.00';
 	rangeWind.value = '1';
@@ -77,11 +162,37 @@ function resetMossControlUI() {
 	valGlow.textContent = '1.0x';
 	btnGame.setAttribute( 'aria-pressed', 'false' );
 	btnGame.classList.remove( 'is-active' );
-	scorePill.hidden = true;
 
 }
 
-async function mountDemo( name ) {
+function resetSnowControlUI() {
+
+	setSegmentedActive( [ btnSnowRepel, btnSnowVortex ], btnSnowRepel );
+	rangeSnowDrift.value = '1';
+	valSnowDrift.textContent = '1.0x';
+	rangeSnowRays.value = '1';
+	valSnowRays.textContent = '1.0x';
+	rangeSnowRadius.value = '1';
+	valSnowRadius.textContent = '1.0x';
+	btnSnowGame.setAttribute( 'aria-pressed', 'false' );
+	btnSnowGame.classList.remove( 'is-active' );
+
+}
+
+function resetDogControlUI( breed = 'labrador' ) {
+
+	const chosen = breedButtons[ breed ] ? breed : 'labrador';
+	setSegmentedActive( Object.values( breedButtons ), breedButtons[ chosen ] );
+	rangeDogPressure.value = '1';
+	valDogPressure.textContent = '1.0x';
+	rangeDogSoftness.value = '1';
+	valDogSoftness.textContent = '1.0x';
+	rangeDogWarmth.value = '1';
+	valDogWarmth.textContent = '1.0x';
+
+}
+
+async function mountDemo( name, options = {} ) {
 
 	if ( switching ) return;
 	switching = true;
@@ -96,25 +207,30 @@ async function mountDemo( name ) {
 		}
 
 		currentName = name;
-		updateDemoButtons( name );
+		updateDemoUI( name );
 		errorBanner.hidden = true;
 
 		if ( name === 'snow' ) {
 
-			currentDemo = await createSnowAndLightExperience( { container: stage } );
+			resetSnowControlUI();
+			currentDemo = await createSnowAndLightExperience( {
+				container: stage,
+				onScoreChange: handleScoreChange
+			} );
+
+		} else if ( name === 'dog' ) {
+
+			const initialBreed = breedButtons[ options.breed ] ? options.breed : 'labrador';
+			resetDogControlUI( initialBreed );
+			currentDemo = await createDogFurExperience( { container: stage } );
+			if ( initialBreed !== 'labrador' ) currentDemo.setBreed( initialBreed );
 
 		} else {
 
 			resetMossControlUI();
 			currentDemo = await createMossTreeExperience( {
 				container: stage,
-				onScoreChange: ( { score, combo, active } ) => {
-
-					scorePill.hidden = ! active;
-					scoreVal.textContent = String( score );
-					comboVal.textContent = `x${ Math.max( 1, combo ) }`;
-
-				}
+				onScoreChange: ( payload ) => handleScoreChange( { ...payload, label: 'Bloom Hunt' } )
 			} );
 
 		}
@@ -134,19 +250,45 @@ async function mountDemo( name ) {
 
 }
 
-// ------------------------------------------------------------ UI Bindings
+// ------------------------------------------------------------ Shared Binding Helpers
 
-btnMoss.addEventListener( 'click', () => {
+function bindRange( input, readout, format, apply ) {
 
-	if ( currentName !== 'moss' ) mountDemo( 'moss' );
+	input.addEventListener( 'input', () => {
 
-} );
+		const v = parseFloat( input.value );
+		readout.textContent = format( v );
+		apply( v );
 
-btnSnow.addEventListener( 'click', () => {
+	} );
 
-	if ( currentName !== 'snow' ) mountDemo( 'snow' );
+}
 
-} );
+function bindGameToggle( button ) {
+
+	button.addEventListener( 'click', () => {
+
+		if ( ! currentDemo?.setGameMode ) return;
+		const next = button.getAttribute( 'aria-pressed' ) !== 'true';
+		button.setAttribute( 'aria-pressed', String( next ) );
+		button.classList.toggle( 'is-active', next );
+		currentDemo.setGameMode( next );
+
+	} );
+
+}
+
+// ------------------------------------------------------------ Demo Switcher & Panel
+
+for ( const [ key, def ] of Object.entries( DEMOS ) ) {
+
+	def.btn.addEventListener( 'click', () => {
+
+		if ( currentName !== key ) mountDemo( key );
+
+	} );
+
+}
 
 btnPanel.addEventListener( 'click', () => {
 
@@ -156,12 +298,13 @@ btnPanel.addEventListener( 'click', () => {
 
 } );
 
+// ------------------------------------------------------------ Moss & Pappus Controls
+
 btnFocusMoss.addEventListener( 'click', () => {
 
 	if ( ! currentDemo?.setFocusMode ) return;
 	currentDemo.setFocusMode( 'moss' );
-	btnFocusMoss.setAttribute( 'aria-pressed', 'true' );
-	btnFocusPointer.setAttribute( 'aria-pressed', 'false' );
+	setSegmentedActive( [ btnFocusMoss, btnFocusPointer ], btnFocusMoss );
 
 } );
 
@@ -169,60 +312,71 @@ btnFocusPointer.addEventListener( 'click', () => {
 
 	if ( ! currentDemo?.setFocusMode ) return;
 	currentDemo.setFocusMode( 'pointer' );
-	btnFocusMoss.setAttribute( 'aria-pressed', 'false' );
-	btnFocusPointer.setAttribute( 'aria-pressed', 'true' );
+	setSegmentedActive( [ btnFocusMoss, btnFocusPointer ], btnFocusPointer );
 
 } );
 
-rangeFocus.addEventListener( 'input', () => {
+bindRange( rangeFocus, valFocus, ( v ) => v.toFixed( 2 ), ( v ) => currentDemo?.setFocusOffset?.( v ) );
+bindRange( rangeWind, valWind, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setWindScale?.( v ) );
+bindRange( rangeGlow, valGlow, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setActivationPersistence?.( v ) );
+btnPulse.addEventListener( 'click', () => currentDemo?.triggerPulse?.() );
+bindGameToggle( btnGame );
 
-	const v = parseFloat( rangeFocus.value );
-	valFocus.textContent = v.toFixed( 2 );
-	if ( currentDemo?.setFocusOffset ) currentDemo.setFocusOffset( v );
+// ------------------------------------------------------------ Snow & Light Controls
 
-} );
+btnSnowRepel.addEventListener( 'click', () => {
 
-rangeWind.addEventListener( 'input', () => {
-
-	const v = parseFloat( rangeWind.value );
-	valWind.textContent = `${ v.toFixed( 1 ) }x`;
-	if ( currentDemo?.setWindScale ) currentDemo.setWindScale( v );
-
-} );
-
-rangeGlow.addEventListener( 'input', () => {
-
-	const v = parseFloat( rangeGlow.value );
-	valGlow.textContent = `${ v.toFixed( 1 ) }x`;
-	if ( currentDemo?.setActivationPersistence ) currentDemo.setActivationPersistence( v );
+	if ( ! currentDemo?.setFieldMode ) return;
+	currentDemo.setFieldMode( 'repel' );
+	setSegmentedActive( [ btnSnowRepel, btnSnowVortex ], btnSnowRepel );
 
 } );
 
-btnPulse.addEventListener( 'click', () => {
+btnSnowVortex.addEventListener( 'click', () => {
 
-	if ( currentDemo?.triggerPulse ) currentDemo.triggerPulse();
-
-} );
-
-btnGame.addEventListener( 'click', () => {
-
-	if ( ! currentDemo?.setGameMode ) return;
-	const next = btnGame.getAttribute( 'aria-pressed' ) !== 'true';
-	btnGame.setAttribute( 'aria-pressed', String( next ) );
-	btnGame.classList.toggle( 'is-active', next );
-	currentDemo.setGameMode( next );
+	if ( ! currentDemo?.setFieldMode ) return;
+	currentDemo.setFieldMode( 'vortex' );
+	setSegmentedActive( [ btnSnowRepel, btnSnowVortex ], btnSnowVortex );
 
 } );
 
-// Fade out the helper hint shortly after the user interacts
-let hintHidden = false;
-window.addEventListener( 'pointermove', () => {
+bindRange( rangeSnowDrift, valSnowDrift, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setBlizzardDrift?.( v ) );
+bindRange( rangeSnowRays, valSnowRays, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setFrozenRays?.( v ) );
+bindRange( rangeSnowRadius, valSnowRadius, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setFieldRadius?.( v ) );
+btnSnowGust.addEventListener( 'click', () => currentDemo?.triggerFrostGust?.() );
+bindGameToggle( btnSnowGame );
 
-	if ( hintHidden ) return;
-	hintHidden = true;
-	setTimeout( () => hint.classList.add( 'is-hidden' ), 2200 );
+// ------------------------------------------------------------ Petting Fur Controls
 
-}, { passive: true } );
+const allBreedBtns = Object.values( breedButtons );
+for ( const [ breedKey, btn ] of Object.entries( breedButtons ) ) {
+
+	btn.addEventListener( 'click', () => {
+
+		if ( ! currentDemo?.setBreed ) return;
+		currentDemo.setBreed( breedKey );
+		setSegmentedActive( allBreedBtns, btn );
+
+	} );
+
+}
+
+bindRange( rangeDogPressure, valDogPressure, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setTouchPressure?.( v ) );
+bindRange( rangeDogSoftness, valDogSoftness, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setCoatSoftness?.( v ) );
+bindRange( rangeDogWarmth, valDogWarmth, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setSunbeamWarmth?.( v ) );
+btnDogShake.addEventListener( 'click', () => currentDemo?.triggerShakeOff?.() );
+btnDogSmooth.addEventListener( 'click', () => currentDemo?.triggerSmoothCoat?.() );
+
+// Dismiss helper hint quickly once the user touches or moves across the stage
+function dismissHintSoon() {
+
+	if ( hint.classList.contains( 'is-hidden' ) ) return;
+	if ( hintTimer ) clearTimeout( hintTimer );
+	hintTimer = setTimeout( () => hint.classList.add( 'is-hidden' ), 1600 );
+
+}
+stage.addEventListener( 'pointerdown', dismissHintSoon, { passive: true } );
+stage.addEventListener( 'pointermove', dismissHintSoon, { passive: true } );
 
 // Periodic telemetry update
 setInterval( () => {
@@ -238,7 +392,17 @@ setInterval( () => {
 
 }, 500 );
 
-// Boot initial scene (?demo=snow or default moss; ?demo=light kept as alias)
+// Boot initial scene (?demo=moss | ?demo=snow | ?demo=dog & optional ?breed=labrador|husky|bernese)
 const flags = parseRuntimeFlags();
-const startSnow = flags.demo === 'snow' || flags.demo === 'snow-and-light' || flags.demo === 'light';
-mountDemo( startSnow ? 'snow' : 'moss' );
+const urlParams = new URLSearchParams( window.location.search );
+const requestedBreed = ( urlParams.get( 'breed' ) || '' ).toLowerCase();
+
+function resolveInitialDemo( demoFlag ) {
+
+	if ( demoFlag === 'snow' || demoFlag === 'snow-and-light' || demoFlag === 'light' ) return 'snow';
+	if ( demoFlag === 'dog' || demoFlag === 'fur' || demoFlag === 'dog-fur' || demoFlag === 'petting' ) return 'dog';
+	return 'moss';
+
+}
+
+mountDemo( resolveInitialDemo( flags.demo ), { breed: requestedBreed } );

@@ -306,7 +306,14 @@ export function createSnowSwarm( { scene, overlayScene, config, quality, collide
 		shieldCore: uniform( cfg.shieldCore ),
 		swirl: uniform( cfg.swirl ),
 		wake: uniform( cfg.wake ),
-		maxSpeed: uniform( cfg.maxSpeed )
+		maxSpeed: uniform( cfg.maxSpeed ),
+
+		// Bespoke Snow & Light live controls
+		vortexMode: uniform( 0 ), // 0 = Repel Shield, 1 = Crystal Vortex
+		driftScale: uniform( 1 ),
+		gustOrigin: uniform( new THREE.Vector3( 0, 0, 0 ) ),
+		gustAge: uniform( 10 ),
+		gustStrength: uniform( 0 )
 	};
 
 	const C = collider.uniforms;
@@ -332,21 +339,42 @@ export function createSnowSwarm( { scene, overlayScene, config, quality, collide
 
 		const R = C.radius;
 
-		const flow = TSL.sampleCurlFlow( p, U.flowFrequency, U.flowAmplitude, U.flowOffset ).toVar();
+		const flow = TSL.sampleCurlFlow( p, U.flowFrequency, U.flowAmplitude.mul( U.driftScale ), U.flowOffset ).toVar();
 
 		const rel = p.sub( C.position ).toVar();
 		const r = max( length( rel ), 1e-3 ).toVar();
 		const n = rel.div( r ).toVar();
 
+		const swirlBoost = U.swirl.mul( float( 0.65 ).add( U.driftScale.mul( 0.35 ) ) )
+			.mul( float( 1 ).add( U.vortexMode.mul( 3.2 ) ) );
+
 		flow.addAssign( TSL.computeDipoleWake( rel, r, R, C.velocity, U.wake ) );
-		flow.addAssign( TSL.computeVortexSwirl( n, r, R, U.swirlAxis, U.swirl ) );
+		flow.addAssign( TSL.computeVortexSwirl( n, r, R, U.swirlAxis, swirlBoost ) );
 
 		const acc = vec3( 0 ).toVar();
 		const homeWorld = H.xyz.mul( U.bounds ).add( U.center );
-		acc.addAssign( homeWorld.sub( p ).mul( U.homeStiffness ) );
+		acc.addAssign( homeWorld.sub( p ).mul( U.homeStiffness.mul( mix( float( 1 ), float( 0.55 ), U.vortexMode ) ) ) );
 
-		const reach = smoothstep( R, U.gravityRange, r ).oneMinus();
-		acc.subAssign( n.mul( U.gravity.mul( pull ).mul( inertia.inverseSqrt() ).div( r.mul( r ).add( 0.35 ) ).mul( reach ) ) );
+		const reach = smoothstep( R, U.gravityRange.mul( float( 1 ).add( U.vortexMode.mul( 0.65 ) ) ), r ).oneMinus();
+		const pullStrength = U.gravity.mul( pull ).mul( float( 1 ).add( U.vortexMode.mul( 3.1 ) ) );
+		acc.subAssign( n.mul( pullStrength.mul( inertia.inverseSqrt() ).div( r.mul( r ).add( 0.35 ) ).mul( reach ) ) );
+
+		// Expanding winter Frost Gust shockwave ring across the entire snowfield
+		const gustHeat = float( 0 ).toVar();
+		If( U.gustAge.lessThan( 2.4 ), () => {
+
+			const waveR = U.gustAge.mul( 5.6 );
+			const gRel = p.sub( U.gustOrigin );
+			const gDist = max( length( gRel ), 1e-3 );
+			const gDir = gRel.div( gDist );
+			const ring = smoothstep( 1.25, 0.0, abs( gDist.sub( waveR ) ) );
+			const fade = smoothstep( 2.4, 0.0, U.gustAge );
+			const swirlDir = normalize( cross( U.swirlAxis, gDir ).add( vec3( 0, 0.25, 0 ) ) );
+			const gustForce = gDir.mul( 0.85 ).add( swirlDir.mul( 0.65 ) ).add( vec3( 0, 0.35, 0 ) );
+			acc.addAssign( gustForce.mul( ring.mul( fade ).mul( U.gustStrength ).mul( 42.0 ).div( inertia.sqrt() ) ) );
+			gustHeat.assign( ring.mul( fade ).mul( U.gustStrength ).mul( 0.85 ) );
+
+		} );
 
 		const coupling = U.drag.div( inertia ).toVar();
 
@@ -354,7 +382,7 @@ export function createSnowSwarm( { scene, overlayScene, config, quality, collide
 
 			const orbitRadius = R.mul( mix( 0.24, 0.6, fract( seed.mul( 7.31 ) ) ) );
 			const orbitAxis = normalize( vec3( fract( seed.mul( 91.7 ) ), fract( seed.mul( 37.3 ) ), fract( seed.mul( 59.1 ) ) ).sub( 0.5 ).add( 1e-3 ) );
-			const orbitSpeed = mix( 1.3, 2.9, fract( seed.mul( 3.7 ) ) );
+			const orbitSpeed = mix( 1.3, 2.9, fract( seed.mul( 3.7 ) ) ).mul( float( 1 ).add( U.vortexMode.mul( 0.75 ) ) );
 
 			acc.assign( n.mul( orbitRadius.sub( r ).mul( 70 ) ) );
 			flow.assign( C.velocity.add( cross( orbitAxis, n ).mul( orbitSpeed ) ) );
@@ -371,10 +399,10 @@ export function createSnowSwarm( { scene, overlayScene, config, quality, collide
 			prev: C.previous,
 			curr: C.position,
 			colliderVel: C.velocity,
-			radius: R,
+			radius: R.mul( mix( float( 1 ), float( 0.52 ), U.vortexMode ) ),
 			shellOffset: H.w,
 			bodyHalfSize: size.mul( 0.5 ),
-			stiffness: U.shieldStiffness,
+			stiffness: U.shieldStiffness.mul( mix( float( 1 ), float( 0.38 ), U.vortexMode ) ),
 			damping: U.shieldDamping,
 			coreFraction: U.shieldCore,
 			inertia,
@@ -395,14 +423,14 @@ export function createSnowSwarm( { scene, overlayScene, config, quality, collide
 			w,
 			q: Q.toVar(),
 			v,
-			impact: hit.impact,
+			impact: hit.impact.add( gustHeat.mul( 2.8 ) ),
 			impactNormal: hit.normal,
 			seed,
 			inertia,
 			dt
 		} );
 
-		const nextHeat = TSL.decayHeat( heat, hit.impact, 1.7, 0.085, dt );
+		const nextHeat = TSL.decayHeat( heat, hit.impact.add( gustHeat.mul( 1.8 ) ), 1.7, 0.085, dt );
 
 		P.assign( vec4( p, nextHeat ) );
 		V.assign( vec4( v, 0 ) );
@@ -611,6 +639,28 @@ export function createSnowSwarm( { scene, overlayScene, config, quality, collide
 	} );
 
 	const orbColorTmp = new THREE.Color();
+	let vortexTarget = 0;
+	let driftAccumulator = 0;
+
+	function setFieldMode( mode ) {
+
+		vortexTarget = mode === 'vortex' ? 1 : 0;
+
+	}
+
+	function setBlizzardDrift( scale ) {
+
+		U.driftScale.value = THREE.MathUtils.clamp( scale, 0.2, 2.5 );
+
+	}
+
+	function triggerFrostGust( origin = collider.position, strength = 1.0 ) {
+
+		U.gustOrigin.value.copy( origin );
+		U.gustAge.value = 0;
+		U.gustStrength.value = strength;
+
+	}
 
 	function setFrame( f ) {
 
@@ -626,12 +676,14 @@ export function createSnowSwarm( { scene, overlayScene, config, quality, collide
 		U.dt.value = dt;
 		U.time.value = time;
 		U.reveal.value = Math.min( 1, U.reveal.value + dt / 3.2 );
+		U.vortexMode.value += ( vortexTarget - U.vortexMode.value ) * Math.min( 1, dt * 6.0 );
+		if ( U.gustAge.value < 10 ) U.gustAge.value += dt;
 
 		orbColorTmp.copy( orbLight.color ).multiplyScalar( orbLight.intensity );
 		U.orbColor.value.copy( orbColorTmp );
 
-		const drift = time * cfg.flowDrift;
-		U.flowOffset.value.set( drift * 0.35, drift, drift * 0.7 );
+		driftAccumulator += dt * cfg.flowDrift * ( 0.45 + U.driftScale.value * 0.55 );
+		U.flowOffset.value.set( driftAccumulator * 0.35, driftAccumulator, driftAccumulator * 0.7 );
 		U.swirlAxis.value.set( 0.22 * Math.sin( time * 0.11 ), 0.3 * Math.cos( time * 0.07 ), 0.93 ).normalize();
 
 		cubeSystem.dispatch( renderer );
@@ -651,6 +703,9 @@ export function createSnowSwarm( { scene, overlayScene, config, quality, collide
 		cubeSystem,
 		dustSystem,
 		bodyCount: quality.cubes + quality.dust,
+		setFieldMode,
+		setBlizzardDrift,
+		triggerFrostGust,
 		setFrame,
 		update,
 		dispose

@@ -238,6 +238,31 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 	}
 
+	let lastPointerTouchDownMs = - Infinity;
+	let lastPointerTouchMoveMs = - Infinity;
+
+	function updateSlotFromPoint( slot, clientX, clientY, pressureVal, snapIfInactive ) {
+
+		if ( ! projectToDogSurface( clientX, clientY, hitScratch ) ) return;
+
+		const wasInactive = ! slot.active;
+		slot.targetPos.copy( hitScratch );
+		if ( snapIfInactive && wasInactive ) {
+
+			slot.pos.copy( hitScratch );
+			slot.prevPos.copy( hitScratch );
+			slot.vel.set( 0, 0, 0 );
+
+		}
+
+		slot.active = true;
+		slot.lastMoveTime = elapsedNow;
+		slot.pressure = pressureVal;
+		hasUserInteracted = true;
+		lastInteractElapsed = elapsedNow;
+
+	}
+
 	function onPointerDown( e ) {
 
 		// Ignore taps on HUD controls overlaid above the canvas
@@ -247,36 +272,34 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 		lastInteractElapsed = elapsedNow;
 
 		const isMouse = e.pointerType === 'mouse';
-		if ( isMouse ) mouseDown = true;
+		if ( isMouse ) {
+
+			mouseDown = true;
+
+		} else {
+
+			lastPointerTouchDownMs = performance.now();
+
+		}
 
 		const key = isMouse ? 'mouse' : e.pointerId;
 		const slot = acquireSlot( key, isMouse );
 		if ( ! slot ) return;
 
-		if ( ! isMouse && container.setPointerCapture ) {
+		if ( ! isMouse ) {
 
-			try { container.setPointerCapture( e.pointerId ); } catch {}
+			const capTarget = e.target && e.target.setPointerCapture ? e.target : container;
+			if ( capTarget.setPointerCapture ) {
 
-		}
-
-		if ( projectToDogSurface( e.clientX, e.clientY, hitScratch ) ) {
-
-			slot.targetPos.copy( hitScratch );
-			// Snap immediately on fresh touch contact to avoid velocity jump
-			if ( ! slot.active ) {
-
-				slot.pos.copy( hitScratch );
-				slot.prevPos.copy( hitScratch );
-				slot.vel.set( 0, 0, 0 );
+				try { capTarget.setPointerCapture( e.pointerId ); } catch {}
 
 			}
 
-			slot.active = true;
-			slot.lastMoveTime = elapsedNow;
-			const nativeP = typeof e.pressure === 'number' && e.pressure > 0.05 ? e.pressure : 0.5;
-			slot.pressure = isMouse ? 1.32 : ( 0.88 + nativeP * 0.65 );
-
 		}
+
+		const nativeP = typeof e.pressure === 'number' && e.pressure > 0.05 ? e.pressure : 0.5;
+		const press = isMouse ? 1.32 : ( 0.88 + nativeP * 0.65 );
+		updateSlotFromPoint( slot, e.clientX, e.clientY, press, true );
 
 	}
 
@@ -285,44 +308,43 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 		const isMouse = e.pointerType === 'mouse';
 		const key = isMouse ? 'mouse' : e.pointerId;
 
+		if ( ! isMouse ) lastPointerTouchMoveMs = performance.now();
+
 		let slot = findSlotByPointer( key );
 		if ( ! slot && isMouse ) {
 
 			// Desktop hover glides gently over the fur without needing click-hold
+			if ( e.target !== container && ! container.contains( e.target ) ) return;
 			slot = acquireSlot( 'mouse', true );
+
+		} else if ( ! slot && ! isMouse && ( e.buttons > 0 || e.pressure > 0 ) ) {
+
+			// Recover seamlessly if a desktop browser changed pointerId or dropped capture mid-swipe
+			if ( e.target === container || container.contains( e.target ) ) {
+
+				slot = acquireSlot( key, false );
+
+			}
 
 		}
 		if ( ! slot ) return;
 
-		if ( projectToDogSurface( e.clientX, e.clientY, hitScratch ) ) {
+		const coalesced = ! isMouse && e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+		const sample = coalesced && coalesced.length > 0 ? coalesced[ coalesced.length - 1 ] : e;
 
-			const wasInactive = ! slot.active;
-			slot.targetPos.copy( hitScratch );
-			if ( wasInactive ) {
+		let press;
+		if ( isMouse ) {
 
-				slot.pos.copy( hitScratch );
-				slot.prevPos.copy( hitScratch );
-				slot.vel.set( 0, 0, 0 );
+			press = mouseDown ? 1.35 : 0.85;
 
-			}
+		} else {
 
-			slot.active = true;
-			slot.lastMoveTime = elapsedNow;
-			hasUserInteracted = true;
-			lastInteractElapsed = elapsedNow;
-
-			if ( isMouse ) {
-
-				slot.pressure = mouseDown ? 1.35 : 0.85;
-
-			} else {
-
-				const nativeP = typeof e.pressure === 'number' && e.pressure > 0.05 ? e.pressure : 0.55;
-				slot.pressure = 0.88 + nativeP * 0.65;
-
-			}
+			const nativeP = typeof sample.pressure === 'number' && sample.pressure > 0.05 ? sample.pressure : 0.55;
+			press = 0.88 + nativeP * 0.65;
 
 		}
+
+		updateSlotFromPoint( slot, sample.clientX, sample.clientY, press, true );
 
 	}
 
@@ -349,20 +371,86 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 	}
 
+	// Non-passive TouchEvent guard + deduplicated fallback for desktop touchscreens
+	// (e.g., Chrome on touchscreen laptops). Prevents browser scroll/back-swipe hijacking
+	// while remaining completely transparent to iOS Pointer Events and mouse/trackpad input.
+	function onTouchStart( e ) {
+
+		if ( e.target !== container && ! container.contains( e.target ) ) return;
+		if ( e.cancelable ) e.preventDefault();
+
+		if ( ( performance.now() - lastPointerTouchDownMs ) < 32 ) return;
+
+		for ( const t of e.changedTouches ) {
+
+			const slot = acquireSlot( `touch:${ t.identifier }`, false );
+			if ( ! slot ) continue;
+			const force = typeof t.force === 'number' && t.force > 0.05 ? t.force : 0.5;
+			updateSlotFromPoint( slot, t.clientX, t.clientY, 0.88 + force * 0.65, true );
+
+		}
+
+	}
+
+	function onTouchMove( e ) {
+
+		if ( e.target !== container && ! container.contains( e.target ) ) return;
+		if ( e.cancelable ) e.preventDefault();
+
+		// When Pointer Events are actively delivering moves (e.g., iPhone), avoid duplicate updates
+		if ( ( performance.now() - lastPointerTouchMoveMs ) < 40 ) return;
+
+		// Release any stale PointerEvent touch slots whose pointermove stream stalled
+		for ( const s of slots ) {
+
+			if ( s.pointerId !== null && ! s.isMouse && typeof s.pointerId !== 'string' ) {
+
+				s.active = false;
+				s.pointerId = null;
+
+			}
+
+		}
+
+		for ( const t of e.touches ) {
+
+			const slot = acquireSlot( `touch:${ t.identifier }`, false );
+			if ( ! slot ) continue;
+			const force = typeof t.force === 'number' && t.force > 0.05 ? t.force : 0.55;
+			updateSlotFromPoint( slot, t.clientX, t.clientY, 0.88 + force * 0.65, true );
+
+		}
+
+	}
+
+	function onTouchEnd( e ) {
+
+		for ( const t of e.changedTouches ) releaseSlot( `touch:${ t.identifier }` );
+
+	}
+
 	container.addEventListener( 'pointerdown', onPointerDown );
-	container.addEventListener( 'pointermove', onPointerMove );
-	container.addEventListener( 'pointerup', onPointerUp );
-	container.addEventListener( 'pointercancel', onPointerUp );
+	window.addEventListener( 'pointermove', onPointerMove, { passive: true } );
+	window.addEventListener( 'pointerup', onPointerUp, { passive: true } );
+	window.addEventListener( 'pointercancel', onPointerUp, { passive: true } );
 	container.addEventListener( 'pointerleave', onPointerLeave );
+	container.addEventListener( 'touchstart', onTouchStart, { passive: false } );
+	container.addEventListener( 'touchmove', onTouchMove, { passive: false } );
+	container.addEventListener( 'touchend', onTouchEnd, { passive: true } );
+	container.addEventListener( 'touchcancel', onTouchEnd, { passive: true } );
 
 	engine.trackDisposable( {
 		dispose() {
 
 			container.removeEventListener( 'pointerdown', onPointerDown );
-			container.removeEventListener( 'pointermove', onPointerMove );
-			container.removeEventListener( 'pointerup', onPointerUp );
-			container.removeEventListener( 'pointercancel', onPointerUp );
+			window.removeEventListener( 'pointermove', onPointerMove );
+			window.removeEventListener( 'pointerup', onPointerUp );
+			window.removeEventListener( 'pointercancel', onPointerUp );
 			container.removeEventListener( 'pointerleave', onPointerLeave );
+			container.removeEventListener( 'touchstart', onTouchStart );
+			container.removeEventListener( 'touchmove', onTouchMove );
+			container.removeEventListener( 'touchend', onTouchEnd );
+			container.removeEventListener( 'touchcancel', onTouchEnd );
 
 		}
 	} );

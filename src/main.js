@@ -377,6 +377,8 @@ function dismissHintSoon() {
 }
 stage.addEventListener( 'pointerdown', dismissHintSoon, { passive: true } );
 stage.addEventListener( 'pointermove', dismissHintSoon, { passive: true } );
+stage.addEventListener( 'touchstart', dismissHintSoon, { passive: true } );
+stage.addEventListener( 'touchmove', dismissHintSoon, { passive: true } );
 
 // Periodic telemetry update
 setInterval( () => {
@@ -396,6 +398,50 @@ setInterval( () => {
 const flags = parseRuntimeFlags();
 const urlParams = new URLSearchParams( window.location.search );
 const requestedBreed = ( urlParams.get( 'breed' ) || '' ).toLowerCase();
+
+// Opt-in live input event monitor (?debug-input) for diagnosing novel touchscreen hardware
+if ( urlParams.has( 'debug-input' ) ) {
+
+	const box = document.createElement( 'pre' );
+	box.id = 'input-debug-overlay';
+	box.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:30;margin:0;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,0.78);color:#d7f5e5;border:1px solid rgba(255,255,255,0.2);font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;pointer-events:none;max-width:min(92vw,420px);white-space:pre-wrap;';
+	box.textContent = `input-debug ready · maxTouchPoints=${ navigator.maxTouchPoints }`;
+	document.body.appendChild( box );
+
+	const rows = [];
+	const logEv = ( e ) => {
+
+		const sig = `${ e.type }${ e.pointerType ? `(${ e.pointerType }#${ e.pointerId })` : '' }`;
+		const xy = typeof e.clientX === 'number'
+			? `${ Math.round( e.clientX ) },${ Math.round( e.clientY ) }`
+			: ( e.touches?.[ 0 ] ? `${ Math.round( e.touches[ 0 ].clientX ) },${ Math.round( e.touches[ 0 ].clientY ) }` : '' );
+		const extra = e.type === 'wheel'
+			? ` d=${ Math.round( e.deltaX ) },${ Math.round( e.deltaY ) }`
+			: ( e.touches ? ` n=${ e.touches.length }` : ( typeof e.buttons === 'number' ? ` b=${ e.buttons }` : '' ) );
+
+		if ( rows.length > 0 && rows[ rows.length - 1 ].sig === sig ) {
+
+			rows[ rows.length - 1 ].count ++;
+			rows[ rows.length - 1 ].tail = `${ xy }${ extra }`;
+
+		} else {
+
+			rows.push( { sig, count: 1, tail: `${ xy }${ extra }` } );
+			if ( rows.length > 9 ) rows.shift();
+
+		}
+
+		box.textContent = `maxTouchPoints=${ navigator.maxTouchPoints }\n` + rows.map( ( r ) => `${ r.sig } x${ r.count } ${ r.tail }` ).join( '\n' );
+
+	};
+
+	for ( const name of [ 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'wheel' ] ) {
+
+		window.addEventListener( name, logEv, { passive: true, capture: true } );
+
+	}
+
+}
 
 function resolveInitialDemo( demoFlag ) {
 

@@ -93,7 +93,23 @@ export function createCollider( {
 
 	};
 
-	const onPointerMove = ( event ) => setPointer( event.clientX, event.clientY );
+	let lastPointerTouchMs = - Infinity;
+
+	const onPointerMove = ( event ) => {
+
+		if ( event.pointerType !== 'mouse' ) {
+
+			lastPointerTouchMs = performance.now();
+			const coalesced = event.getCoalescedEvents ? event.getCoalescedEvents() : null;
+			const sample = coalesced && coalesced.length > 0 ? coalesced[ coalesced.length - 1 ] : event;
+			setPointer( sample.clientX, sample.clientY );
+			return;
+
+		}
+
+		setPointer( event.clientX, event.clientY );
+
+	};
 
 	const onPointerDown = ( event ) => {
 
@@ -101,6 +117,18 @@ export function createCollider( {
 		if ( event.pointerType === 'mouse' || event.pointerType === 'touch' || event.pointerType === 'pen' ) {
 
 			pointer.pressed = true;
+
+		}
+
+		if ( event.pointerType !== 'mouse' ) {
+
+			lastPointerTouchMs = performance.now();
+			const targetEl = event.target;
+			if ( targetEl && ( targetEl === element || element.contains( targetEl ) ) && targetEl.setPointerCapture ) {
+
+				try { targetEl.setPointerCapture( event.pointerId ); } catch {}
+
+			}
 
 		}
 
@@ -112,6 +140,50 @@ export function createCollider( {
 
 	};
 
+	// Non-passive TouchEvent guard + deduplicated fallback for desktop touchscreens
+	// (e.g., Chrome on touchscreen laptops) where browser pan/swipe recognizers can
+	// suppress `pointermove` or emit `pointercancel` after initial finger contact.
+	// Never runs for mouse/trackpad and stays silent when `pointermove` is active (iOS).
+	const isStageTarget = ( target ) => target === element || element.contains( target );
+
+	const onTouchStart = ( event ) => {
+
+		if ( ! isStageTarget( event.target ) ) return;
+		if ( event.cancelable ) event.preventDefault();
+
+		if ( event.touches.length > 0 ) {
+
+			const t = event.touches[ 0 ];
+			setPointer( t.clientX, t.clientY );
+			pointer.pressed = true;
+
+		}
+
+	};
+
+	const onTouchMove = ( event ) => {
+
+		if ( ! isStageTarget( event.target ) ) return;
+		if ( event.cancelable ) event.preventDefault();
+
+		if ( ( performance.now() - lastPointerTouchMs ) < 32 ) return;
+
+		if ( event.touches.length > 0 ) {
+
+			const t = event.touches[ 0 ];
+			setPointer( t.clientX, t.clientY );
+			pointer.pressed = true;
+
+		}
+
+	};
+
+	const onTouchEnd = ( event ) => {
+
+		if ( event.touches.length === 0 ) pointer.pressed = false;
+
+	};
+
 	if ( element && mode !== 'custom' ) {
 
 		window.addEventListener( 'pointermove', onPointerMove, { passive: true } );
@@ -119,6 +191,10 @@ export function createCollider( {
 		window.addEventListener( 'pointerup', onPointerUp, { passive: true } );
 		window.addEventListener( 'pointercancel', onPointerUp, { passive: true } );
 		window.addEventListener( 'blur', onPointerUp );
+		element.addEventListener( 'touchstart', onTouchStart, { passive: false } );
+		element.addEventListener( 'touchmove', onTouchMove, { passive: false } );
+		element.addEventListener( 'touchend', onTouchEnd, { passive: true } );
+		element.addEventListener( 'touchcancel', onTouchEnd, { passive: true } );
 
 	}
 
@@ -314,6 +390,10 @@ export function createCollider( {
 			window.removeEventListener( 'pointerup', onPointerUp );
 			window.removeEventListener( 'pointercancel', onPointerUp );
 			window.removeEventListener( 'blur', onPointerUp );
+			element.removeEventListener( 'touchstart', onTouchStart );
+			element.removeEventListener( 'touchmove', onTouchMove );
+			element.removeEventListener( 'touchend', onTouchEnd );
+			element.removeEventListener( 'touchcancel', onTouchEnd );
 
 		}
 

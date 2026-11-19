@@ -377,8 +377,6 @@ function dismissHintSoon() {
 }
 stage.addEventListener( 'pointerdown', dismissHintSoon, { passive: true } );
 stage.addEventListener( 'pointermove', dismissHintSoon, { passive: true } );
-stage.addEventListener( 'touchstart', dismissHintSoon, { passive: true } );
-stage.addEventListener( 'touchmove', dismissHintSoon, { passive: true } );
 
 // Periodic telemetry update
 setInterval( () => {
@@ -399,19 +397,21 @@ const flags = parseRuntimeFlags();
 const urlParams = new URLSearchParams( window.location.search );
 const requestedBreed = ( urlParams.get( 'breed' ) || '' ).toLowerCase();
 
-// Opt-in live input event monitor (?debug-input) for diagnosing novel touchscreen hardware
+// Strictly opt-in passive input event monitor (?debug-input only; completely dormant otherwise)
 if ( urlParams.has( 'debug-input' ) ) {
 
 	const box = document.createElement( 'pre' );
 	box.id = 'input-debug-overlay';
-	box.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:30;margin:0;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,0.78);color:#d7f5e5;border:1px solid rgba(255,255,255,0.2);font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;pointer-events:none;max-width:min(92vw,420px);white-space:pre-wrap;';
-	box.textContent = `input-debug ready · maxTouchPoints=${ navigator.maxTouchPoints }`;
+	box.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:30;margin:0;padding:10px 12px;border-radius:10px;background:rgba(0,0,0,0.82);color:#d7f5e5;border:1px solid rgba(255,255,255,0.22);font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;pointer-events:none;max-width:min(94vw,480px);white-space:pre-wrap;';
+	box.textContent = `debug-input ready · maxTouchPoints=${ navigator.maxTouchPoints } · pointer=${ window.matchMedia?.( '(pointer: coarse)' ).matches ? 'coarse' : 'fine' }`;
 	document.body.appendChild( box );
 
 	const rows = [];
 	const logEv = ( e ) => {
 
-		const sig = `${ e.type }${ e.pointerType ? `(${ e.pointerType }#${ e.pointerId })` : '' }`;
+		const tgt = e.target && e.target.id ? `#${ e.target.id }` : ( e.target?.tagName?.toLowerCase() || '?' );
+		const pInfo = e.pointerType ? `(${ e.pointerType }#${ e.pointerId })` : '';
+		const sig = `${ e.type }${ pInfo } ${ tgt }`;
 		const xy = typeof e.clientX === 'number'
 			? `${ Math.round( e.clientX ) },${ Math.round( e.clientY ) }`
 			: ( e.touches?.[ 0 ] ? `${ Math.round( e.touches[ 0 ].clientX ) },${ Math.round( e.touches[ 0 ].clientY ) }` : '' );
@@ -427,7 +427,7 @@ if ( urlParams.has( 'debug-input' ) ) {
 		} else {
 
 			rows.push( { sig, count: 1, tail: `${ xy }${ extra }` } );
-			if ( rows.length > 9 ) rows.shift();
+			if ( rows.length > 12 ) rows.shift();
 
 		}
 
@@ -435,7 +435,13 @@ if ( urlParams.has( 'debug-input' ) ) {
 
 	};
 
-	for ( const name of [ 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'wheel' ] ) {
+	const evNames = [
+		'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture',
+		'touchstart', 'touchmove', 'touchend', 'touchcancel',
+		'mousedown', 'mousemove', 'mouseup', 'click', 'wheel',
+		'gesturestart', 'gesturechange', 'gestureend'
+	];
+	for ( const name of evNames ) {
 
 		window.addEventListener( name, logEv, { passive: true, capture: true } );
 

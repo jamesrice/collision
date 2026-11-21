@@ -490,7 +490,11 @@ btnBreath.addEventListener( 'click', async () => {
 		console.warn( '[breath] microphone unavailable', err );
 		btnBreath.dataset.phase = 'off';
 		btnBreath.setAttribute( 'aria-pressed', 'false' );
-		showToast( 'Microphone permission needed for Breath', 2600 );
+		const name = err && err.name || '';
+		const msg = ( name === 'NotAllowedError' || name === 'PermissionDeniedError' )
+			? 'Microphone permission denied'
+			: ( name === 'NotFoundError' ? 'No microphone detected' : `Breath error: ${ err?.message || 'unavailable' }` );
+		showToast( msg, 2800 );
 
 	} finally {
 
@@ -513,15 +517,19 @@ btnHands.addEventListener( 'click', async () => {
 		const on = await handInput.toggle();
 		btnHands.classList.toggle( 'is-active', on );
 		btnHands.setAttribute( 'aria-pressed', String( on ) );
-		btnHands.title = on ? 'Webcam Hand Tracking (On — 1 finger focus, open palm broad, closer = deeper)' : 'Webcam Hand Tracking (Off)';
-		showToast( on ? 'Hands: Active · 1 finger or open palm' : 'Hands: Off', 2200 );
+		btnHands.title = on ? 'Webcam Hand Tracking (On — wave open hand, 1 finger focus, closer = deeper)' : 'Webcam Hand Tracking (Off)';
+		showToast( on ? 'Hands: Active · wave open hand or point' : 'Hands: Off', 2200 );
 
 	} catch ( err ) {
 
 		console.warn( '[hands] webcam unavailable', err );
 		btnHands.classList.remove( 'is-active' );
 		btnHands.setAttribute( 'aria-pressed', 'false' );
-		showToast( 'Camera permission needed for Hand Tracking', 2600 );
+		const name = err && err.name || '';
+		const msg = ( name === 'NotAllowedError' || name === 'PermissionDeniedError' )
+			? 'Camera permission denied'
+			: ( name === 'NotFoundError' ? 'No camera detected' : `Hand tracking error: ${ err?.message || 'failed to load' }` );
+		showToast( msg, 3000 );
 
 	} finally {
 

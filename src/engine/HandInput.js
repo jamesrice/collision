@@ -5,7 +5,7 @@
 //
 // Zero network cost until toggled On; tearing down stops all camera MediaStreamTracks.
 
-const MP_VERSION = '0.10.22';
+const MP_VERSION = '1.2.3';
 const MP_BUNDLE_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${ MP_VERSION }/vision_bundle.mjs`;
 const MP_WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${ MP_VERSION }/wasm`;
 const MP_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
@@ -278,8 +278,8 @@ export function createHandInput() {
 
 			const cover = computeCoverRect( W, H );
 			stageCtx.save();
-			stageCtx.globalAlpha = 0.13;
-			stageCtx.filter = 'grayscale(0.75) contrast(1.22) brightness(0.92) blur(1.2px)';
+			stageCtx.globalAlpha = 0.16;
+			stageCtx.filter = 'grayscale(0.72) contrast(1.24) brightness(0.95) blur(1px)';
 			stageCtx.translate( W, 0 );
 			stageCtx.scale( - 1, 1 );
 			stageCtx.drawImage( video, cover.x, cover.y, cover.w, cover.h );
@@ -596,11 +596,12 @@ export function createHandInput() {
 		const ringMCP = lms[ 13 ];
 		const pinkyMCP = lms[ 17 ];
 
-		// Apparent 2D palm scale is an ultra-stable inverse-distance Z proximity metric
+		// Apparent 2D palm scale calibrated for natural ~1 foot (~30 cm) laptop webcam distance
+		// (~1 ft -> proximity ~0.50; closer ~6-8 in -> ~0.90; farther ~20-24 in -> ~0.15)
 		const palmLen = dist2( wrist, middleMCP );
 		const palmWid = dist2( indexMCP, pinkyMCP );
 		const palmSize = Math.max( 0.04, 0.55 * palmLen + 0.45 * palmWid );
-		const rawProx = clamp( ( palmSize - 0.09 ) / 0.19, 0, 1 );
+		const rawProx = clamp( ( palmSize - 0.08 ) / 0.24, 0, 1 );
 		const proximity = hf.prox.filter( rawProx, tSec );
 
 		// Mirrored palm center (wrist + knuckle centroid)

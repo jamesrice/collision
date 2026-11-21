@@ -14,6 +14,7 @@ export function createBreathInput( { getAudioOutputLevel = () => 0 } = {} ) {
 	let stream = null;
 	let source = null;
 	let workletNode = null;
+	let silentSink = null;
 	let starting = null;
 
 	// Adaptive calibration & smoothed DSP state
@@ -125,12 +126,19 @@ export function createBreathInput( { getAudioOutputLevel = () => 0 } = {} ) {
 			source = ctx.createMediaStreamSource( stream );
 			workletNode = new AudioWorkletNode( ctx, 'breath-analyzer-processor', {
 				numberOfInputs: 1,
-				numberOfOutputs: 0,
+				numberOfOutputs: 1,
+				outputChannelCount: [ 1 ],
 				channelCountMode: 'max'
 			} );
 
+			// Connect through a zero-gain sink so WebKit/Safari & Chromium always pull the worklet graph
+			silentSink = ctx.createGain();
+			silentSink.gain.value = 0;
+
 			workletNode.port.onmessage = ( ev ) => onMetrics( ev.data );
 			source.connect( workletNode );
+			workletNode.connect( silentSink );
+			silentSink.connect( ctx.destination );
 
 			if ( ctx.state === 'suspended' ) await ctx.resume();
 
@@ -164,6 +172,12 @@ export function createBreathInput( { getAudioOutputLevel = () => 0 } = {} ) {
 
 	function stopMic() {
 
+		if ( silentSink ) {
+
+			try { silentSink.disconnect(); } catch {}
+			silentSink = null;
+
+		}
 		if ( workletNode ) {
 
 			try { workletNode.disconnect(); } catch {}

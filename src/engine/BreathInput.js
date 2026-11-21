@@ -30,6 +30,207 @@ export function createBreathInput( { getAudioOutputLevel = () => 0 } = {} ) {
 	let pendingPuff = false;
 	let lastError = null;
 
+	// Subtle ambient flowing breath-waveform overlay (matching HandInput's gossamer light-line style)
+	let waveCanvas = null;
+	let waveCtx = null;
+	let waveResize = null;
+	let wavePhase = 0;
+	let displaySteerX = 0;
+	let puffRippleAge = 10;
+	let puffRippleX = 0.5;
+
+	function sizeWaveCanvas() {
+
+		if ( ! waveCanvas ) return;
+		const dpr = Math.min( window.devicePixelRatio || 1, 1.5 );
+		const w = Math.max( 1, Math.round( window.innerWidth * dpr ) );
+		const h = Math.max( 1, Math.round( window.innerHeight * dpr ) );
+		if ( waveCanvas.width !== w || waveCanvas.height !== h ) {
+
+			waveCanvas.width = w;
+			waveCanvas.height = h;
+
+		}
+
+	}
+
+	function ensureWaveOverlay() {
+
+		if ( waveCanvas ) return;
+		waveCanvas = document.createElement( 'canvas' );
+		waveCanvas.id = 'breath-stage-overlay';
+		waveCanvas.style.cssText = [
+			'position:fixed',
+			'inset:0',
+			'width:100%',
+			'height:100%',
+			'z-index:4',
+			'pointer-events:none',
+			'mix-blend-mode:screen'
+		].join( ';' );
+		document.body.appendChild( waveCanvas );
+		waveCtx = waveCanvas.getContext( '2d' );
+		sizeWaveCanvas();
+		waveResize = () => sizeWaveCanvas();
+		window.addEventListener( 'resize', waveResize, { passive: true } );
+
+	}
+
+	function removeWaveOverlay() {
+
+		if ( waveResize ) {
+
+			window.removeEventListener( 'resize', waveResize );
+			waveResize = null;
+
+		}
+		if ( waveCanvas && waveCanvas.parentNode ) waveCanvas.parentNode.removeChild( waveCanvas );
+		waveCanvas = null;
+		waveCtx = null;
+
+	}
+
+	function drawBreathWaveform( dt, energy, steerX, centroid, puff, mode ) {
+
+		if ( ! waveCtx || ! waveCanvas ) return;
+
+		const W = waveCanvas.width;
+		const H = waveCanvas.height;
+		const dpr = W / Math.max( 1, window.innerWidth );
+		waveCtx.clearRect( 0, 0, W, H );
+
+		// Smoothly glide the focal crest horizontally to visualize breath directionality
+		const steerTarget = mode === 'steer' || hasStereo ? steerX : ( steerX * 0.45 );
+		displaySteerX += ( steerTarget - displaySteerX ) * ( 1 - Math.exp( - dt * 8.0 ) );
+
+		// Advance flowing ribbon phase (direction tracks breath steering; speed scales with intensity)
+		const dirSign = displaySteerX >= - 0.04 ? 1 : - 1;
+		wavePhase += dt * ( 1.45 + energy * 7.2 ) * dirSign;
+
+		if ( puff ) {
+
+			puffRippleAge = 0;
+			puffRippleX = 0.5 + displaySteerX * 0.34;
+
+		} else if ( puffRippleAge < 2.0 ) {
+
+			puffRippleAge += dt;
+
+		}
+
+		const styles = getComputedStyle( document.body );
+		const accent = styles.getPropertyValue( '--accent' ).trim() || '#a6ea57';
+		const warm = styles.getPropertyValue( '--accent-warm' ).trim() || '#f6dc7a';
+
+		// Ribbon sits gently along the lower horizon above the hint & GitHub pill
+		const spanW = Math.min( W * 0.66, 620 * dpr );
+		const x0 = ( W - spanW ) * 0.5;
+		const baseY = H - Math.max( 86 * dpr, H * 0.13 );
+		const focusU = 0.5 + displaySteerX * 0.38; // normalized crest center [0.12 .. 0.88]
+		const focusX = x0 + focusU * spanW;
+
+		// Soft luminous directional focal glow riding along the breath crest
+		if ( energy > 0.03 ) {
+
+			const glowR = ( 34 + energy * 76 ) * dpr;
+			const g = waveCtx.createRadialGradient( focusX, baseY, 0, focusX, baseY, glowR );
+			g.addColorStop( 0, mode === 'steer' ? warm : accent );
+			g.addColorStop( 1, 'rgba(0,0,0,0)' );
+			waveCtx.save();
+			waveCtx.globalAlpha = Math.min( 0.24, 0.05 + energy * 0.20 );
+			waveCtx.fillStyle = g;
+			waveCtx.beginPath();
+			waveCtx.arc( focusX, baseY, glowR, 0, Math.PI * 2 );
+			waveCtx.fill();
+			waveCtx.restore();
+
+		}
+
+		// Three gossamer layered airflow ribbons (intensity controls amplitude, centroid controls wave fineness)
+		const layers = [
+			{ freq: 2.2 + centroid * 2.6, amp: 1.00, alpha: 0.10 + energy * 0.28, width: 1.35 * dpr, color: warm, phaseOff: 0 },
+			{ freq: 3.1 + centroid * 3.2, amp: 0.68, alpha: 0.07 + energy * 0.21, width: 1.05 * dpr, color: accent, phaseOff: 1.9 },
+			{ freq: 1.5 + centroid * 1.8, amp: 0.48, alpha: 0.05 + energy * 0.16, width: 0.90 * dpr, color: accent, phaseOff: 3.7 }
+		];
+
+		const maxAmp = ( 2.5 + Math.pow( energy, 0.85 ) * 34 ) * dpr;
+		const samples = 64;
+
+		for ( const L of layers ) {
+
+			waveCtx.save();
+			// Horizontal feathered fade at both ends so the waveform floats organically in air
+			const grad = waveCtx.createLinearGradient( x0, baseY, x0 + spanW, baseY );
+			grad.addColorStop( 0.00, 'rgba(0,0,0,0)' );
+			grad.addColorStop( 0.16, L.color );
+			grad.addColorStop( 0.84, L.color );
+			grad.addColorStop( 1.00, 'rgba(0,0,0,0)' );
+
+			waveCtx.strokeStyle = grad;
+			waveCtx.globalAlpha = L.alpha;
+			waveCtx.lineWidth = L.width;
+			waveCtx.lineCap = 'round';
+			waveCtx.beginPath();
+
+			for ( let i = 0; i <= samples; i ++ ) {
+
+				const u = i / samples;
+				const px = x0 + u * spanW;
+
+				// Smooth bell envelope centered around the directional breath focus
+				const edgeFade = Math.sin( u * Math.PI );
+				const dFocus = u - focusU;
+				const dirFocus = 0.36 + 0.64 * Math.exp( - dFocus * dFocus * 9.5 );
+				const env = edgeFade * dirFocus;
+
+				const theta = u * Math.PI * 2 * L.freq - wavePhase + L.phaseOff;
+				const harmonic = Math.sin( theta ) * 0.72 + Math.sin( theta * 1.73 + 0.8 ) * 0.28;
+				const py = baseY + harmonic * maxAmp * L.amp * env;
+
+				if ( i === 0 ) waveCtx.moveTo( px, py );
+				else waveCtx.lineTo( px, py );
+
+			}
+
+			waveCtx.stroke();
+			waveCtx.restore();
+
+		}
+
+		// Subtle directional indicator dot in Phase 2 ('steer') or stereo mode showing live horizontal aim
+		if ( mode === 'steer' || hasStereo ) {
+
+			waveCtx.save();
+			waveCtx.globalAlpha = 0.22 + energy * 0.44;
+			waveCtx.fillStyle = warm;
+			waveCtx.beginPath();
+			waveCtx.arc( focusX, baseY, ( 2.2 + energy * 2.0 ) * dpr, 0, Math.PI * 2 );
+			waveCtx.fill();
+			waveCtx.restore();
+
+		}
+
+		// Delicate expanding mist-ring ripple on strong breath puffs
+		if ( puffRippleAge < 0.95 ) {
+
+			const t = puffRippleAge / 0.95;
+			const ease = 1 - Math.pow( 1 - t, 3 );
+			const rx = x0 + ( 0.5 + ( puffRippleX - 0.5 ) * 1.1 ) * spanW;
+			const r = ( 14 + ease * 92 ) * dpr;
+
+			waveCtx.save();
+			waveCtx.strokeStyle = warm;
+			waveCtx.globalAlpha = ( 1 - t ) * 0.30;
+			waveCtx.lineWidth = 1.2 * dpr;
+			waveCtx.beginPath();
+			waveCtx.ellipse( rx, baseY, r * 1.45, r * 0.48, 0, 0, Math.PI * 2 );
+			waveCtx.stroke();
+			waveCtx.restore();
+
+		}
+
+	}
+
 	function onMetrics( m ) {
 
 		if ( modeIndex === 0 || ! m ) return;
@@ -148,6 +349,7 @@ export function createBreathInput( { getAudioOutputLevel = () => 0 } = {} ) {
 			prevEnergy = 0;
 			pendingPuff = false;
 			lastError = null;
+			ensureWaveOverlay();
 			return true;
 
 		} )();
@@ -212,6 +414,7 @@ export function createBreathInput( { getAudioOutputLevel = () => 0 } = {} ) {
 		prevEnergy = 0;
 		pendingPuff = false;
 		calibFrames = 0;
+		removeWaveOverlay();
 
 	}
 
@@ -270,6 +473,8 @@ export function createBreathInput( { getAudioOutputLevel = () => 0 } = {} ) {
 		const centroidX = Math.max( - 0.88, Math.min( 0.88, ( smoothCentroid - 0.44 ) * 2.4 ) );
 		const steerX = hasStereo ? smoothStereoPan : centroidX;
 		const steerY = Math.max( - 0.45, Math.min( 0.55, ( smoothEnergy - 0.35 ) * 0.75 ) );
+
+		drawBreathWaveform( dt, smoothEnergy, steerX, smoothCentroid, puff, MODES[ modeIndex ] );
 
 		return {
 			mode: MODES[ modeIndex ],

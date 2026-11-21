@@ -273,35 +273,8 @@ export function createHandInput() {
 		const accent = styles.getPropertyValue( '--accent' ).trim() || '#a6ea57';
 		const warm = styles.getPropertyValue( '--accent-warm' ).trim() || '#f6dc7a';
 
-		// 1. Whisper-soft ambient ghost-glass reflection of what the webcam sees
-		if ( video && video.readyState >= 2 ) {
-
-			const cover = computeCoverRect( W, H );
-			stageCtx.save();
-			stageCtx.globalAlpha = 0.16;
-			stageCtx.filter = 'grayscale(0.72) contrast(1.24) brightness(0.95) blur(1px)';
-			stageCtx.translate( W, 0 );
-			stageCtx.scale( - 1, 1 );
-			stageCtx.drawImage( video, cover.x, cover.y, cover.w, cover.h );
-			stageCtx.restore();
-
-			// Soft edge vignette so the ambient camera reflection melts seamlessly into the frame
-			stageCtx.save();
-			stageCtx.globalCompositeOperation = 'destination-in';
-			const vig = stageCtx.createRadialGradient(
-				W * 0.5, H * 0.5, Math.min( W, H ) * 0.22,
-				W * 0.5, H * 0.5, Math.max( W, H ) * 0.68
-			);
-			vig.addColorStop( 0, 'rgba(255,255,255,1)' );
-			vig.addColorStop( 0.72, 'rgba(255,255,255,0.68)' );
-			vig.addColorStop( 1, 'rgba(255,255,255,0.12)' );
-			stageCtx.fillStyle = vig;
-			stageCtx.fillRect( 0, 0, W, H );
-			stageCtx.restore();
-
-		}
-
-		// 2. Full-screen 1:1 luminous skeletal filaments, palm Z-depth halo, and per-digit fingertip rings
+		// Pure light-line overlay (no camera video reflection): 1:1 skeletal filaments,
+		// gentle Z-depth palm aura, and per-digit fingertip nodes at whisper-soft opacity.
 		if ( handsData && handsData.length > 0 ) {
 
 			const cover = computeCoverRect( W, H );
@@ -316,8 +289,8 @@ export function createHandInput() {
 				// Delicate gossamer hand filaments
 				stageCtx.save();
 				stageCtx.strokeStyle = accent;
-				stageCtx.globalAlpha = 0.24;
-				stageCtx.lineWidth = 1.5 * dpr;
+				stageCtx.globalAlpha = 0.16;
+				stageCtx.lineWidth = 1.25 * dpr;
 				stageCtx.lineCap = 'round';
 				stageCtx.beginPath();
 				for ( const [ a, b ] of HAND_EDGES ) {
@@ -333,25 +306,25 @@ export function createHandInput() {
 				// Palm Z-axis distance pressure aura
 				const px = mapX( hd.palmX );
 				const py = mapY( hd.palmY );
-				const palmR = ( 22 + hd.proximity * 54 ) * dpr;
+				const palmR = ( 20 + hd.proximity * 50 ) * dpr;
 				const palmGrad = stageCtx.createRadialGradient( px, py, 0, px, py, palmR );
 				palmGrad.addColorStop( 0, hd.posture === 'fist' || hd.isPinched ? warm : accent );
 				palmGrad.addColorStop( 1, 'rgba(0,0,0,0)' );
-				stageCtx.globalAlpha = hd.posture === 'fist' || hd.isPinched ? 0.32 : 0.16;
+				stageCtx.globalAlpha = hd.posture === 'fist' || hd.isPinched ? 0.21 : 0.10;
 				stageCtx.fillStyle = palmGrad;
 				stageCtx.beginPath();
 				stageCtx.arc( px, py, palmR, 0, Math.PI * 2 );
 				stageCtx.fill();
 
-				// Crisp outer Z-pressure ring around palm
-				stageCtx.globalAlpha = 0.26 + hd.proximity * 0.34;
+				// Soft outer Z-pressure ring around palm
+				stageCtx.globalAlpha = 0.16 + hd.proximity * 0.24;
 				stageCtx.strokeStyle = hd.posture === 'fist' || hd.isPinched ? warm : accent;
-				stageCtx.lineWidth = 1.35 * dpr;
+				stageCtx.lineWidth = 1.1 * dpr;
 				stageCtx.beginPath();
 				stageCtx.arc( px, py, palmR * 0.72, 0, Math.PI * 2 );
 				stageCtx.stroke();
 
-				// Individual luminous fingertip nodes & active halos
+				// Individual luminous fingertip nodes & subtle halos
 				for ( let fi = 0; fi < FINGER_SPECS.length; fi ++ ) {
 
 					const f = hd.fingers[ fi ];
@@ -361,28 +334,28 @@ export function createHandInput() {
 
 					if ( isActiveTip ) {
 
-						const haloR = ( ( hd.posture === 'point' ? 14 : 18 ) + hd.proximity * 16 ) * dpr;
+						const haloR = ( ( hd.posture === 'point' ? 13 : 16 ) + hd.proximity * 14 ) * dpr;
 						const tipGrad = stageCtx.createRadialGradient( fx, fy, 0, fx, fy, haloR );
 						tipGrad.addColorStop( 0, hd.isPinched && fi <= 1 ? warm : accent );
 						tipGrad.addColorStop( 1, 'rgba(0,0,0,0)' );
-						stageCtx.globalAlpha = 0.45;
+						stageCtx.globalAlpha = 0.28;
 						stageCtx.fillStyle = tipGrad;
 						stageCtx.beginPath();
 						stageCtx.arc( fx, fy, haloR, 0, Math.PI * 2 );
 						stageCtx.fill();
 
-						stageCtx.globalAlpha = 0.88;
+						stageCtx.globalAlpha = 0.66;
 						stageCtx.fillStyle = warm;
 						stageCtx.beginPath();
-						stageCtx.arc( fx, fy, ( 3.4 + hd.proximity * 2.2 ) * dpr, 0, Math.PI * 2 );
+						stageCtx.arc( fx, fy, ( 2.9 + hd.proximity * 1.9 ) * dpr, 0, Math.PI * 2 );
 						stageCtx.fill();
 
 					} else {
 
-						stageCtx.globalAlpha = 0.28;
+						stageCtx.globalAlpha = 0.16;
 						stageCtx.fillStyle = accent;
 						stageCtx.beginPath();
-						stageCtx.arc( fx, fy, 2.2 * dpr, 0, Math.PI * 2 );
+						stageCtx.arc( fx, fy, 1.9 * dpr, 0, Math.PI * 2 );
 						stageCtx.fill();
 
 					}
@@ -912,17 +885,7 @@ export function createHandInput() {
 				lastParsedHands = [];
 				drawAmbientStageOverlay( null );
 
-			} else {
-
-				// Keep ambient camera veil alive smoothly between hand detections
-				drawAmbientStageOverlay( lastParsedHands );
-
 			}
-
-		} else if ( stageCtx && video && video.readyState >= 2 ) {
-
-			// Keep ambient ghost-glass camera reflection rendering smoothly at display refresh rate
-			drawAmbientStageOverlay( lastParsedHands );
 
 		}
 

@@ -4,9 +4,14 @@
 
 A general-purpose **WebGPU + Three.js r187 + TSL** interactive collision and GPU-simulation framework, paired with three complete interactive experiences:
 
-1. **Macro Moss Tree & Dandelion Pappus** *(default)* — A macro-focused gnarled forest tree covered in 32k–145k GPU-simulated moss cushion fronds, swaying sporophytes, rising optical-bokeh spores, and sculpted 3D dandelion pappus parachutes floating in woodland sunbeams. Moving your pointer or finger glides over the 3D bark to brush, ripple, unfurl, and illuminate the moss while swirling dandelion pappus through dipole air wakes.
-2. **Snow & Light** — Tens of thousands of procedural 3D dendritic ice crystals and optical-bokeh frost dust swirling before ambiently reflective shimmering frozen glass and deep blue rays, with live Field Mode (`Repel Shield` / `Crystal Vortex`), `Blizzard Drift`, `Frozen Rays`, `Field Radius`, `Frost Gust`, and the `Starlight Hunt` mini-game.
-3. **Petting Fur** — A tactile, touch-first macro view of petting a dog's living double-coat fur (48k–192k GPU-simulated anisotropic strands + sunlit coat motes). Supports multi-touch petting (up to 3 simultaneous fingers) and morphs live on the GPU between **Black Labrador**, **Husky**, and **Bernese Mountain Dog**, with controls for `Touch Pressure`, `Coat Softness`, `Sunbeam Warmth`, `Shake Off`, and `Smooth Coat`.
+1. **Macro Moss Tree & Dandelion Pappus** *(default)* — A macro-focused gnarled forest tree covered in 32k–145k GPU-simulated moss cushion fronds, swaying sporophytes, rising optical-bokeh spores, and sculpted 3D dandelion pappus parachutes floating in woodland sunbeams. Moving your pointer, finger, breath, or hand glides over the 3D bark to brush, ripple, unfurl, and illuminate the moss while swirling dandelion pappus through dipole air wakes, with serene `Drift Blooms`.
+2. **Snow & Light** — Tens of thousands of procedural 3D dendritic ice crystals and optical-bokeh frost dust swirling before ambiently reflective shimmering frozen glass and deep blue rays, with live Field Mode (`Repel Shield` / `Crystal Vortex`), `Blizzard Drift`, `Frozen Rays`, `Field Radius`, `Frost Gust`, and `Starlight Drift`.
+3. **Petting Fur** — A tactile, touch-first macro view of petting a dog's living double-coat fur (38k–136k GPU-simulated anisotropic strands + sunlit coat motes). Supports multi-touch petting (up to 5 independent fingers or webcam digits), breath wind ripples, and morphs live on the GPU between **Black Labrador**, **Husky**, and **Bernese Mountain Dog**, with controls for `Touch Pressure`, `Coat Softness`, `Sunbeam Warmth`, `Shake Off`, and `Smooth Coat`.
+
+### Multi-Sensory Global Controls (Top-Right Dock)
+- **Ambient Procedural Audio (`AudioWorklet`)**: Real-time 48 kHz physical-modeling & ASMR synthesis (modal resonators, dual-SVF airflow/velvet fur whisper, refracted frost micro-grains, Hadamard FDN stereo reverb) consistent to each scene and independent of input method.
+- **3-Phase Breath Input (`AudioWorklet` Mic DSP)**: Cycles **Off → Breeze → Steer**. Gentle exhales create living wind across moss, snow, or fur; strong puffs trigger `Send Pulse`, `Frost Gust`, or `Shake Off`; Phase 2 (`Steer`) guides motion via breath brightness (or stereo L/R balance on stereo mics).
+- **Webcam Hand Tracking (`@mediapipe/tasks-vision` + One Euro Filter)**: Lazy-loaded on demand with independent 5-digit finger tracking, Z-axis camera proximity scaling pressure/radius, and distinct single-finger vs. open-palm vs. pinch/fist responses.
 
 ---
 

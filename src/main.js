@@ -1,4 +1,9 @@
-import { parseRuntimeFlags } from './engine/index.js';
+import {
+	parseRuntimeFlags,
+	createAudioEngine,
+	createBreathInput,
+	createHandInput
+} from './engine/index.js';
 import { createMossTreeExperience } from './examples/moss-tree/scene.js';
 import { createSnowAndLightExperience } from './examples/snow-and-light/scene.js';
 import { createDogFurExperience } from './examples/dog-fur/scene.js';
@@ -12,11 +17,19 @@ const btnPanel = $( 'btn-toggle-panel' );
 const panel = $( 'hud-panel' );
 const themeMeta = document.querySelector( 'meta[name="theme-color"]' );
 
-const scorePill = $( 'score-pill' );
-const scoreLabel = $( 'score-label' );
-const scoreVal = $( 'score-val' );
-const comboVal = $( 'combo-val' );
+const btnHands = $( 'btn-hands' );
+const btnBreath = $( 'btn-breath' );
+const btnAudio = $( 'btn-audio' );
+const modeToast = $( 'mode-toast' );
 const hint = $( 'hint' );
+
+// Global multi-sensory engines (persist across scene switches)
+const audioEngine = createAudioEngine();
+const breathInput = createBreathInput( {
+	getAudioOutputLevel: () => audioEngine.getOutputLevel()
+} );
+const handInput = createHandInput();
+window.__sensory = { audio: audioEngine, breath: breathInput, hands: handInput };
 
 const statBackend = $( 'stat-backend' );
 const statFps = $( 'stat-fps' );
@@ -95,11 +108,22 @@ let currentDemo = null;
 let currentName = 'moss';
 let switching = false;
 let hintTimer = null;
+let toastTimer = null;
 
 function showError( err ) {
 
 	errorDetail.textContent = String( err && err.stack || err );
 	errorBanner.hidden = false;
+
+}
+
+function showToast( text, durationMs = 2000 ) {
+
+	if ( ! modeToast ) return;
+	modeToast.textContent = text;
+	modeToast.classList.add( 'is-visible' );
+	if ( toastTimer ) clearTimeout( toastTimer );
+	toastTimer = setTimeout( () => modeToast.classList.remove( 'is-visible' ), durationMs );
 
 }
 
@@ -110,15 +134,6 @@ function setSegmentedActive( buttons, activeBtn ) {
 		b.setAttribute( 'aria-pressed', String( b === activeBtn ) );
 
 	}
-
-}
-
-function handleScoreChange( { score, combo, active, label } ) {
-
-	if ( label ) scoreLabel.textContent = label;
-	scorePill.hidden = ! active;
-	scoreVal.textContent = String( score );
-	comboVal.textContent = `x${ Math.max( 1, combo ) }`;
 
 }
 
@@ -146,7 +161,6 @@ function updateDemoUI( name ) {
 	}
 
 	stage.classList.toggle( 'cursor-hidden', spec.hideCursor );
-	scorePill.hidden = true;
 	showHint( spec.hint );
 
 }
@@ -208,6 +222,7 @@ async function mountDemo( name, options = {} ) {
 
 		currentName = name;
 		updateDemoUI( name );
+		audioEngine.setScene( name );
 		errorBanner.hidden = true;
 
 		if ( name === 'snow' ) {
@@ -215,14 +230,17 @@ async function mountDemo( name, options = {} ) {
 			resetSnowControlUI();
 			currentDemo = await createSnowAndLightExperience( {
 				container: stage,
-				onScoreChange: handleScoreChange
+				audio: audioEngine
 			} );
 
 		} else if ( name === 'dog' ) {
 
 			const initialBreed = breedButtons[ options.breed ] ? options.breed : 'labrador';
 			resetDogControlUI( initialBreed );
-			currentDemo = await createDogFurExperience( { container: stage } );
+			currentDemo = await createDogFurExperience( {
+				container: stage,
+				audio: audioEngine
+			} );
 			if ( initialBreed !== 'labrador' ) currentDemo.setBreed( initialBreed );
 
 		} else {
@@ -230,7 +248,7 @@ async function mountDemo( name, options = {} ) {
 			resetMossControlUI();
 			currentDemo = await createMossTreeExperience( {
 				container: stage,
-				onScoreChange: ( payload ) => handleScoreChange( { ...payload, label: 'Bloom Hunt' } )
+				audio: audioEngine
 			} );
 
 		}
@@ -412,6 +430,153 @@ bindRange( rangeDogSoftness, valDogSoftness, ( v ) => `${ v.toFixed( 1 ) }x`, ( 
 bindRange( rangeDogWarmth, valDogWarmth, ( v ) => `${ v.toFixed( 1 ) }x`, ( v ) => currentDemo?.setSunbeamWarmth?.( v ) );
 btnDogShake.addEventListener( 'click', () => currentDemo?.triggerShakeOff?.() );
 btnDogSmooth.addEventListener( 'click', () => currentDemo?.triggerSmoothCoat?.() );
+
+// ------------------------------------------------------------ Global Sensory Dock (Hands, 3-Phase Breath, Audio)
+
+btnAudio.addEventListener( 'click', async () => {
+
+	try {
+
+		const on = await audioEngine.toggle();
+		btnAudio.classList.toggle( 'is-active', on );
+		btnAudio.setAttribute( 'aria-pressed', String( on ) );
+		btnAudio.title = on ? 'Ambient Audio (On)' : 'Ambient Audio (Muted)';
+		showToast( on ? 'Audio: Ambient On' : 'Audio: Muted', 1600 );
+
+	} catch ( err ) {
+
+		console.warn( '[audio] unable to start audio', err );
+		showToast( 'Audio unavailable in this browser', 2400 );
+
+	}
+
+} );
+
+let breathBusy = false;
+btnBreath.addEventListener( 'click', async () => {
+
+	if ( breathBusy ) return;
+	breathBusy = true;
+	btnBreath.classList.add( 'is-loading' );
+
+	try {
+
+		const mode = await breathInput.cycle();
+		btnBreath.dataset.phase = mode;
+		btnBreath.setAttribute( 'aria-pressed', String( mode !== 'off' ) );
+		if ( mode === 'breeze' ) {
+
+			btnBreath.setAttribute( 'aria-label', 'Breath microphone control: Breeze' );
+			btnBreath.title = 'Breath: Breeze (blow softly for wind, puff for burst — click again for Steer)';
+			showToast( 'Breath: Breeze · puff for burst', 2200 );
+
+		} else if ( mode === 'steer' ) {
+
+			btnBreath.setAttribute( 'aria-label', 'Breath microphone control: Steer' );
+			btnBreath.title = 'Breath: Steer (whooo ↔ shhhh steers across scene — click again for Off)';
+			showToast( 'Breath: Steer · tone guides motion', 2200 );
+
+		} else {
+
+			btnBreath.setAttribute( 'aria-label', 'Breath microphone control: Off' );
+			btnBreath.title = 'Breath Control: Off (click for Breeze, again for Steer)';
+			btnBreath.style.setProperty( '--breath-level', '0' );
+			showToast( 'Breath: Off', 1500 );
+
+		}
+
+	} catch ( err ) {
+
+		console.warn( '[breath] microphone unavailable', err );
+		btnBreath.dataset.phase = 'off';
+		btnBreath.setAttribute( 'aria-pressed', 'false' );
+		showToast( 'Microphone permission needed for Breath', 2600 );
+
+	} finally {
+
+		btnBreath.classList.remove( 'is-loading' );
+		breathBusy = false;
+
+	}
+
+} );
+
+let handsBusy = false;
+btnHands.addEventListener( 'click', async () => {
+
+	if ( handsBusy ) return;
+	handsBusy = true;
+	btnHands.classList.add( 'is-loading' );
+
+	try {
+
+		const on = await handInput.toggle();
+		btnHands.classList.toggle( 'is-active', on );
+		btnHands.setAttribute( 'aria-pressed', String( on ) );
+		btnHands.title = on ? 'Webcam Hand Tracking (On — 1 finger focus, open palm broad, closer = deeper)' : 'Webcam Hand Tracking (Off)';
+		showToast( on ? 'Hands: Active · 1 finger or open palm' : 'Hands: Off', 2200 );
+
+	} catch ( err ) {
+
+		console.warn( '[hands] webcam unavailable', err );
+		btnHands.classList.remove( 'is-active' );
+		btnHands.setAttribute( 'aria-pressed', 'false' );
+		showToast( 'Camera permission needed for Hand Tracking', 2600 );
+
+	} finally {
+
+		btnHands.classList.remove( 'is-loading' );
+		handsBusy = false;
+
+	}
+
+} );
+
+// Unified sensor pump feeding active scene every animation frame (zero work when sensors are off)
+let lastSensorMs = performance.now();
+let prevBreathActive = false;
+let prevHandActive = false;
+
+function pumpSensors( nowMs ) {
+
+	const dt = Math.min( 0.05, Math.max( 1 / 240, ( nowMs - lastSensorMs ) / 1000 ) );
+	lastSensorMs = nowMs;
+
+	if ( currentDemo ) {
+
+		if ( breathInput.active ) {
+
+			prevBreathActive = true;
+			const b = breathInput.update( dt );
+			btnBreath.style.setProperty( '--breath-level', b.energy.toFixed( 3 ) );
+			currentDemo.applyBreath?.( b );
+
+		} else if ( prevBreathActive ) {
+
+			prevBreathActive = false;
+			currentDemo.applyBreath?.( null );
+
+		}
+
+		if ( handInput.active ) {
+
+			prevHandActive = true;
+			const h = handInput.update();
+			currentDemo.applyHands?.( h );
+
+		} else if ( prevHandActive ) {
+
+			prevHandActive = false;
+			currentDemo.applyHands?.( null );
+
+		}
+
+	}
+
+	requestAnimationFrame( pumpSensors );
+
+}
+requestAnimationFrame( pumpSensors );
 
 // Dismiss helper hint quickly once the user touches or moves across the stage
 function dismissHintSoon() {

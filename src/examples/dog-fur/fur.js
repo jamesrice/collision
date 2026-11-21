@@ -277,15 +277,20 @@ export function createDogFurSystem( {
 
 		// Interactive user controls
 		touchRadius: uniform( config.interaction.touchRadius ),
+		touchRadiusScale: uniform( 1.0 ),
 		touchPressure: uniform( config.interaction.defaultPressure ),
 		coatSoftness: uniform( config.interaction.defaultSoftness ),
 		sunWarmth: uniform( config.interaction.defaultWarmth ),
+
+		// Breath wind ripple across coat
+		breathWind: uniform( 0.0 ),
+		breathDir: uniform( 0.0 ),
 
 		// Action waves: Shake Off & Smooth Coat
 		shakeAge: uniform( 10.0 ),
 		smoothAge: uniform( 10.0 ),
 
-		// Multi-touch slots (up to 3 simultaneous fingers / mouse)
+		// Multi-touch / independent 5-digit hand tracking slots (up to 5 simultaneous fingers)
 		t0Pos: uniform( new THREE.Vector3( 0, - 99, 0 ) ),
 		t0Vel: uniform( new THREE.Vector3() ),
 		t0Active: uniform( 0 ),
@@ -295,6 +300,12 @@ export function createDogFurSystem( {
 		t2Pos: uniform( new THREE.Vector3( 0, - 99, 0 ) ),
 		t2Vel: uniform( new THREE.Vector3() ),
 		t2Active: uniform( 0 ),
+		t3Pos: uniform( new THREE.Vector3( 0, - 99, 0 ) ),
+		t3Vel: uniform( new THREE.Vector3() ),
+		t3Active: uniform( 0 ),
+		t4Pos: uniform( new THREE.Vector3( 0, - 99, 0 ) ),
+		t4Vel: uniform( new THREE.Vector3() ),
+		t4Active: uniform( 0 ),
 
 		// Lighting positions for Kajiya-Kay anisotropic hair highlights & rim scatter
 		keyPos: uniform( keyLightPos.clone() ),
@@ -304,7 +315,9 @@ export function createDogFurSystem( {
 	const touchSlots = [
 		{ pos: U.t0Pos, vel: U.t0Vel, active: U.t0Active },
 		{ pos: U.t1Pos, vel: U.t1Vel, active: U.t1Active },
-		{ pos: U.t2Pos, vel: U.t2Vel, active: U.t2Active }
+		{ pos: U.t2Pos, vel: U.t2Vel, active: U.t2Active },
+		{ pos: U.t3Pos, vel: U.t3Vel, active: U.t3Active },
+		{ pos: U.t4Pos, vel: U.t4Vel, active: U.t4Active }
 	];
 
 	// =========================================================================
@@ -346,7 +359,7 @@ export function createDogFurSystem( {
 
 					const rel = worldRoot.sub( tPos );
 					const dist = length( rel );
-					const rad = U.touchRadius.mul( float( 0.82 ).add( U.touchPressure.mul( 0.38 ) ) );
+					const rad = U.touchRadius.mul( U.touchRadiusScale ).mul( float( 0.82 ).add( U.touchPressure.mul( 0.38 ) ) );
 					const normD = dist.div( max( rad, 0.08 ) );
 					const falloff = exp( normD.mul( normD ).mul( - 1.75 ) ).mul( tActive );
 
@@ -388,6 +401,24 @@ export function createDogFurSystem( {
 			applyTouch( U.t0Pos, U.t0Vel, U.t0Active );
 			applyTouch( U.t1Pos, U.t1Vel, U.t1Active );
 			applyTouch( U.t2Pos, U.t2Vel, U.t2Active );
+			applyTouch( U.t3Pos, U.t3Vel, U.t3Active );
+			applyTouch( U.t4Pos, U.t4Vel, U.t4Active );
+
+			// Living microphone breath breeze rippling warmly across the fur strands
+			If( U.breathWind.greaterThan( 0.015 ), () => {
+
+				const gustWave = sin( U.time.mul( 7.5 ).sub( coatU.mul( 5.4 ) ).add( h.y.mul( 3.2 ) ).add( seed.mul( 4.1 ) ) );
+				const flutter = cos( U.time.mul( 13.0 ).add( coatU.mul( 9.2 ) ).add( seed.mul( 11.7 ) ) );
+				const pliable = float( 0.55 ).add( isGuard.mul( 0.75 ) ).mul( float( 0.65 ).add( U.coatSoftness.mul( 0.45 ) ) );
+				const bGain = U.breathWind.mul( pliable );
+				const dirBias = U.breathDir.mul( 0.65 ).add( 0.35 );
+
+				vxy.x.addAssign( dirBias.add( gustWave.mul( 0.55 ) ).mul( bGain ).mul( 10.5 ).mul( U.dt ) );
+				vxy.y.addAssign( flutter.mul( bGain ).mul( 8.5 ).mul( U.dt ) );
+				vLift.addAssign( float( 0.45 ).add( abs( gustWave ).mul( 0.55 ) ).mul( bGain ).mul( 4.2 ).mul( U.dt ) );
+				heat.assign( max( heat, bGain.mul( 0.32 ) ) );
+
+			} );
 
 			// Canine Shake Off: energetic torsional wave rippling from neck (-1) to hip (+1)
 			If( U.shakeAge.lessThan( 2.2 ), () => {
@@ -836,6 +867,19 @@ export function createDogFurSystem( {
 
 	}
 
+	function setTouchRadiusScale( s ) {
+
+		U.touchRadiusScale.value = Math.max( 0.45, Math.min( 2.1, s ) );
+
+	}
+
+	function setBreathWind( energy, dir = 0 ) {
+
+		U.breathWind.value = Math.max( 0, Math.min( 1.4, energy ) );
+		U.breathDir.value = Math.max( - 1, Math.min( 1, dir ) );
+
+	}
+
 	function setCoatSoftness( v ) {
 
 		U.coatSoftness.value = Math.max( 0.15, Math.min( 2.0, v ) );
@@ -920,6 +964,8 @@ export function createDogFurSystem( {
 		setBreed,
 		setTouchSlot,
 		setTouchPressure,
+		setTouchRadiusScale,
+		setBreathWind,
 		setCoatSoftness,
 		setSunWarmth,
 		triggerShakeOff,

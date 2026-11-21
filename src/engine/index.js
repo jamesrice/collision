@@ -10,4 +10,7 @@ export { createDepthOfField } from './DepthOfField.js';
 export { createPostPipeline } from './PostPipeline.js';
 export { createGoboSpotLight, createProceduralEnvironment } from './Lighting.js';
 export { createLightShaft } from './LightShaft.js';
+export { createAudioEngine } from './AudioEngine.js';
+export { createBreathInput } from './BreathInput.js';
+export { createHandInput } from './HandInput.js';
 export * as TSL from './tsl/index.js';

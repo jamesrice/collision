@@ -153,7 +153,7 @@ export const DOG_FUR_CONFIG = {
 
 	interaction: {
 		touchRadius: 0.42,
-		maxTouches: 3,
+		maxTouches: 5,
 		defaultPressure: 1.0,
 		defaultSoftness: 1.0,
 		defaultWarmth: 1.0

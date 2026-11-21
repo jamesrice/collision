@@ -6,14 +6,14 @@ import {
 	createLightShaft
 } from '../../engine/index.js';
 import { DOG_FUR_CONFIG } from './config.js';
-import { createDogBody, evalDogSurface } from './body.js';
+import { createDogBody, evalDogSurface, evalBreathAmount } from './body.js';
 import { createDogFurSystem } from './fur.js';
 
 // "Petting Fur" — tactile macro interactive dog coat experience designed for
-// touch screens (multi-touch petting up to 3 fingers) and pointer interfaces.
+// touch screens (multi-touch / 5-digit hand petting), breath, and pointer interfaces.
 // Morphs live between Black Labrador, Husky, and Bernese Mountain Dog coats.
 
-export async function createDogFurExperience( { container, config = DOG_FUR_CONFIG } ) {
+export async function createDogFurExperience( { container, config = DOG_FUR_CONFIG, audio = null } ) {
 
 	const engine = await createCollisionEngine( {
 		container,
@@ -151,14 +151,17 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 	let hasUserInteracted = false;
 	let lastInteractElapsed = - 10;
 	let elapsedNow = 0;
+	let userPressureSetting = config.interaction.defaultPressure;
+	let liveBreathEnergy = 0;
+	let handsControlling = false;
+	let targetRadiusScale = 1.0;
+	let smoothRadiusScale = 1.0;
+	const activeHandIds = new Set();
 
-	function projectToDogSurface( clientX, clientY, out ) {
+	function projectNdcToDogSurface( nx, ny, out ) {
 
-		const rect = container.getBoundingClientRect();
-		if ( rect.width <= 0 || rect.height <= 0 ) return false;
-
-		ndc.x = ( ( clientX - rect.left ) / rect.width ) * 2 - 1;
-		ndc.y = - ( ( clientY - rect.top ) / rect.height ) * 2 + 1;
+		ndc.x = THREE.MathUtils.clamp( nx, - 1, 1 );
+		ndc.y = THREE.MathUtils.clamp( ny, - 1, 1 );
 
 		raycaster.setFromCamera( ndc, camera );
 		const hits = raycaster.intersectObject( dogBody.mesh, false );
@@ -179,6 +182,17 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 		}
 
 		return false;
+
+	}
+
+	function projectToDogSurface( clientX, clientY, out ) {
+
+		const rect = container.getBoundingClientRect();
+		if ( rect.width <= 0 || rect.height <= 0 ) return false;
+
+		const nx = ( ( clientX - rect.left ) / rect.width ) * 2 - 1;
+		const ny = - ( ( clientY - rect.top ) / rect.height ) * 2 + 1;
+		return projectNdcToDogSurface( nx, ny, out );
 
 	}
 
@@ -289,6 +303,13 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 			const nativeP = typeof e.pressure === 'number' && e.pressure > 0.05 ? e.pressure : 0.5;
 			slot.pressure = isMouse ? 1.32 : ( 0.88 + nativeP * 0.65 );
 
+			if ( audio ) {
+
+				const pan = THREE.MathUtils.clamp( slot.targetPos.x * 0.42, - 0.85, 0.85 );
+				audio.triggerPlink( pan, 0.35 );
+
+			}
+
 		}
 
 	}
@@ -299,6 +320,8 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 		const key = isMouse ? 'mouse' : e.pointerId;
 
 		if ( isMouse ) {
+
+			if ( handsControlling ) return;
 
 			const now = performance.now();
 			// Ignore macOS touchscreen's automatic cursor snap-back right after a finger-swipe ends
@@ -504,6 +527,10 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 		for ( const s of sunShafts ) s.update( fur.reveal * sunWarmth );
 
+		// Smooth touch radius scaling driven by webcam Z-proximity & hand posture (1.0 for mouse/touch)
+		smoothRadiusScale += ( targetRadiusScale - smoothRadiusScale ) * ( 1 - Math.exp( - dt * 10.0 ) );
+		fur.setTouchRadiusScale( smoothRadiusScale );
+
 		// Idle gentle invisible petting caress when untouched for a few seconds so
 		// first-time visitors immediately feel the living softness of the coat
 		const idleSeconds = elapsed - lastInteractElapsed;
@@ -511,6 +538,10 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 		let primarySlot = null;
 		let strongestActive = 0;
+		let totalPetSpeed = 0;
+		let totalPanWeighted = 0;
+		let totalAgainstWeighted = 0;
+		let activeCount = 0;
 
 		for ( let i = 0; i < MAX_SLOTS; i ++ ) {
 
@@ -587,6 +618,39 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 			}
 
+			// Aggregate tactile petting telemetry for AudioEngine (independent of input source)
+			if ( slot.activeSmooth > 0.05 && ! ( i === 0 && useAutopilot && ! slot.active ) ) {
+
+				const sp = slot.vel.length();
+				totalPetSpeed += sp * slot.activeSmooth;
+				totalPanWeighted += THREE.MathUtils.clamp( slot.pos.x * 0.42, - 0.85, 0.85 ) * slot.activeSmooth;
+				// Negative X velocity strokes against the coat's natural neck-to-hip grain
+				const ag = slot.vel.x < - 0.05 ? Math.min( 1, ( - slot.vel.x ) / Math.max( 0.25, sp ) ) : 0;
+				totalAgainstWeighted += ag * slot.activeSmooth;
+				activeCount += slot.activeSmooth;
+
+			}
+
+		}
+
+		if ( audio ) {
+
+			const avgSpeed = activeCount > 0.01 ? Math.min( 2.2, ( totalPetSpeed / activeCount ) * 0.34 ) : 0;
+			const avgPan = activeCount > 0.01 ? ( totalPanWeighted / activeCount ) : 0;
+			const avgAgainst = activeCount > 0.01 ? ( totalAgainstWeighted / activeCount ) : 0;
+
+			audio.updateTelemetry( {
+				speed: avgSpeed,
+				pan: avgPan,
+				pressure: userPressureSetting * Math.max( 0.65, Math.min( 1.6, strongestActive ) ),
+				breath: liveBreathEnergy,
+				dogBreath: evalBreathAmount( elapsed ),
+				breedLab: weights.labrador,
+				breedHusky: weights.husky,
+				breedBernese: weights.bernese,
+				againstGrain: avgAgainst
+			}, dt );
+
 		}
 
 		// Smoothly float warm haptic touch pool & camera focus around active petting zone
@@ -632,7 +696,8 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 		},
 		setTouchPressure( v ) {
 
-			fur.setTouchPressure( v );
+			userPressureSetting = Math.max( 0.25, Math.min( 2.2, v ) );
+			fur.setTouchPressure( userPressureSetting );
 
 		},
 		setCoatSoftness( v ) {
@@ -651,11 +716,141 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 		triggerShakeOff() {
 
 			fur.triggerShakeOff();
+			if ( audio ) audio.triggerShakeOff();
 
 		},
 		triggerSmoothCoat() {
 
 			fur.triggerSmoothCoat();
+			if ( audio ) audio.triggerSmoothCoat();
+
+		},
+		applyBreath( breath ) {
+
+			if ( ! breath || ! breath.active ) {
+
+				liveBreathEnergy = 0;
+				fur.setBreathWind( 0, 0 );
+				releaseSlot( 'breath' );
+				return;
+
+			}
+
+			liveBreathEnergy = breath.energy;
+			fur.setBreathWind( breath.energy, breath.steerX );
+
+			// Strong breath puff triggers Shake Off!
+			if ( breath.puff ) {
+
+				fur.triggerShakeOff();
+				if ( audio ) audio.triggerShakeOff();
+
+			}
+
+			// Phase 2 ('steer'): blowing glides a gentle warm air caress horizontally across the coat
+			if ( breath.mode === 'steer' && breath.energy > 0.08 ) {
+
+				const slot = acquireSlot( 'breath', false );
+				if ( slot && projectNdcToDogSurface( breath.steerX * 0.82, breath.steerY * 0.45, hitScratch ) ) {
+
+					const wasInactive = ! slot.active;
+					slot.targetPos.copy( hitScratch );
+					if ( wasInactive ) {
+
+						slot.pos.copy( hitScratch );
+						slot.prevPos.copy( hitScratch );
+						slot.vel.set( 0, 0, 0 );
+
+					}
+					slot.active = true;
+					slot.lastMoveTime = elapsedNow;
+					slot.pressure = 0.65 + breath.energy * 0.85;
+					hasUserInteracted = true;
+					lastInteractElapsed = elapsedNow;
+
+				}
+
+			} else {
+
+				releaseSlot( 'breath' );
+
+			}
+
+		},
+		applyHands( hand ) {
+
+			if ( ! hand || ! hand.enabled || ! hand.detected ) {
+
+				if ( handsControlling ) {
+
+					handsControlling = false;
+					targetRadiusScale = 1.0;
+					fur.setTouchPressure( userPressureSetting );
+					for ( const id of activeHandIds ) releaseSlot( id );
+					activeHandIds.clear();
+
+				}
+				return;
+
+			}
+
+			handsControlling = true;
+			releaseSlot( 'mouse' );
+
+			// Z-axis distance to camera & single-finger vs. open-palm scale pressure & touch area size
+			fur.setTouchPressure( THREE.MathUtils.clamp( userPressureSetting * hand.pressureScale, 0.35, 2.2 ) );
+			targetRadiusScale = hand.posture === 'point'
+				? THREE.MathUtils.clamp( 0.52 + hand.proximity * 0.45, 0.48, 1.15 )
+				: THREE.MathUtils.clamp( 0.72 + hand.proximity * 0.72, 0.65, 1.65 );
+
+			if ( hand.sweepTriggered ) {
+
+				fur.triggerShakeOff();
+				if ( audio ) audio.triggerShakeOff();
+
+			}
+
+			// Map up to 5 independently tracked extended digits simultaneously across slots 0..4!
+			const seenThisFrame = new Set();
+			for ( const d of hand.digits ) {
+
+				seenThisFrame.add( d.id );
+				activeHandIds.add( d.id );
+				const slot = acquireSlot( d.id, false );
+				if ( ! slot ) continue;
+
+				if ( projectNdcToDogSurface( d.ndcX, d.ndcY, hitScratch ) ) {
+
+					const wasInactive = ! slot.active;
+					slot.targetPos.copy( hitScratch );
+					if ( wasInactive ) {
+
+						slot.pos.copy( hitScratch );
+						slot.prevPos.copy( hitScratch );
+						slot.vel.set( 0, 0, 0 );
+
+					}
+
+					slot.active = true;
+					slot.lastMoveTime = elapsedNow;
+					slot.pressure = d.pressure;
+					hasUserInteracted = true;
+					lastInteractElapsed = elapsedNow;
+
+				}
+
+			}
+
+			for ( const id of activeHandIds ) {
+
+				if ( ! seenThisFrame.has( id ) ) {
+
+					releaseSlot( id );
+					activeHandIds.delete( id );
+
+				}
+
+			}
 
 		},
 		dispose: () => engine.dispose()

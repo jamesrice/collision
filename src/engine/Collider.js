@@ -31,7 +31,8 @@ export function createCollider( {
 	floorMarginRatio = 0.6,
 	clampToBounds = true,
 	wanderFn = null,
-	initialPosition = new THREE.Vector3( 0, 0, 0 )
+	initialPosition = new THREE.Vector3( 0, 0, 0 ),
+	onPress = null
 } = {} ) {
 
 	const position = initialPosition.clone();
@@ -104,9 +105,21 @@ export function createCollider( {
 	let preTouchMouseX = NaN;
 	let preTouchMouseY = NaN;
 
+	// Optional external driver (e.g., Webcam Hand Tracking or Phase-2 Breath-Steer)
+	const externalDriver = {
+		active: false,
+		ndcX: 0,
+		ndcY: 0,
+		radiusMul: 1.0,
+		pressed: false,
+		suppressMouseHover: false
+	};
+
 	const onPointerMove = ( event ) => {
 
 		if ( event.pointerType === 'mouse' ) {
+
+			if ( externalDriver.active && externalDriver.suppressMouseHover ) return;
 
 			const now = performance.now();
 			// Ignore macOS touchscreen's automatic cursor snap-back right after a finger-swipe ends
@@ -145,6 +158,11 @@ export function createCollider( {
 		if ( event.pointerType === 'mouse' || event.pointerType === 'touch' || event.pointerType === 'pen' ) {
 
 			pointer.pressed = true;
+			if ( onPress && element && ( event.target === element || element.contains( event.target ) ) ) {
+
+				onPress( pointer.ndc.x, pointer.ndc.y );
+
+			}
 
 		}
 
@@ -261,7 +279,19 @@ export function createCollider( {
 		if ( mode !== 'custom' ) {
 
 			const now = performance.now() / 1000;
-			const idle = enableAutopilot && ( now - pointer.lastMove > idleAfter );
+
+			if ( externalDriver.active ) {
+
+				pointer.ndc.set(
+					THREE.MathUtils.clamp( externalDriver.ndcX, - 1, 1 ),
+					THREE.MathUtils.clamp( externalDriver.ndcY, - 1, 1 )
+				);
+				pointer.lastMove = now;
+				pointer.hasMoved = true;
+
+			}
+
+			const idle = enableAutopilot && ! externalDriver.active && ( now - pointer.lastMove > idleAfter );
 
 			const autoTarget = idle ? 1 : 0;
 			const autoRate = idle ? 0.9 : 7.0;
@@ -323,8 +353,10 @@ export function createCollider( {
 
 		pointer.speed = velocity.length();
 
-		// Springy radius charge while pointer is pressed
-		const scaleGoal = pointer.pressed ? chargeScale : 1.0;
+		// Springy radius charge while pointer is pressed (or shaped by external Z-proximity / hand posture)
+		const baseMul = externalDriver.active ? THREE.MathUtils.clamp( externalDriver.radiusMul, 0.45, 2.2 ) : 1.0;
+		const isPressed = pointer.pressed || ( externalDriver.active && externalDriver.pressed );
+		const scaleGoal = baseMul * ( isPressed ? chargeScale : 1.0 );
 		radiusVelocity += ( ( scaleGoal - radiusScale ) * chargeStiffness - radiusVelocity * chargeDamping ) * dt;
 		radiusScale += radiusVelocity * dt;
 
@@ -378,6 +410,27 @@ export function createCollider( {
 
 	}
 
+	function setExternalDriver( next ) {
+
+		if ( ! next || ! next.active ) {
+
+			externalDriver.active = false;
+			externalDriver.pressed = false;
+			externalDriver.radiusMul = 1.0;
+			externalDriver.suppressMouseHover = false;
+			return;
+
+		}
+
+		externalDriver.active = true;
+		if ( typeof next.ndcX === 'number' ) externalDriver.ndcX = next.ndcX;
+		if ( typeof next.ndcY === 'number' ) externalDriver.ndcY = next.ndcY;
+		externalDriver.radiusMul = typeof next.radiusMul === 'number' ? next.radiusMul : 1.0;
+		externalDriver.pressed = Boolean( next.pressed );
+		externalDriver.suppressMouseHover = Boolean( next.suppressMouseHover );
+
+	}
+
 	function setSurfaceMeshes( nextMeshes ) {
 
 		meshes.length = 0;
@@ -421,6 +474,7 @@ export function createCollider( {
 		setTarget,
 		teleport,
 		setPointer,
+		setExternalDriver,
 		setSurfaceMeshes,
 		dispose
 	};

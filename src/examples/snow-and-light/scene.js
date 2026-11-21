@@ -14,7 +14,7 @@ import { createSnowSwarm } from './swarm.js';
 export async function createSnowAndLightExperience( {
 	container,
 	config = SNOW_AND_LIGHT_CONFIG,
-	onScoreChange = null
+	audio = null
 } ) {
 
 	const engine = await createCollisionEngine( {
@@ -41,7 +41,12 @@ export async function createSnowAndLightExperience( {
 		depthSway: config.orb.depthSway,
 		idleAfter: config.orb.idleAfter,
 		chargeScale: config.orb.chargeScale,
-		floorY: config.world.floorY
+		floorY: config.world.floorY,
+		onPress: ( nx ) => {
+
+			if ( audio ) audio.triggerPlink( THREE.MathUtils.clamp( nx * 0.85, - 0.85, 0.85 ), 0.68 );
+
+		}
 	} );
 	colliders.add( collider );
 	collider.setBounds( frame.halfWidth, frame.halfHeight, frame.centerY );
@@ -98,10 +103,29 @@ export async function createSnowAndLightExperience( {
 	engine.addSystem( swarm );
 
 	let rayIntensity = 1.0;
+	let userFieldMode = 'repel';
+	let effectiveVortex = false;
+	let userBlizzardDrift = 1.0;
+	let userFieldRadius = 1.0;
+	let breathEnergy = 0;
+	let handDriverActive = false;
+	let breathSteerActive = false;
+	let stillWarmAccum = 0;
 
-	// ---- Interactive mini-game: Starlight Hunt ----
-	// Uses `engine.triggers` (continuous swept-segment collision) so sweeping the
-	// field orb through drifting starlight prisms detonates a frost gust and combos.
+	function syncVortexState( handPinchOrFist = false ) {
+
+		const nextVortex = userFieldMode === 'vortex' || handPinchOrFist;
+		if ( nextVortex !== effectiveVortex ) {
+
+			effectiveVortex = nextVortex;
+			swarm.setFieldMode( effectiveVortex ? 'vortex' : 'repel' );
+			orbVisuals.setVortexMode( effectiveVortex );
+
+		}
+
+	}
+
+	// ---- Serene drifting prisms: Starlight Drift (score-free visual + glass-chime ripples) ----
 	const BEACON_COUNT = 5;
 	const beaconGroup = new THREE.Group();
 	beaconGroup.visible = false;
@@ -130,9 +154,6 @@ export async function createSnowAndLightExperience( {
 
 	const beacons = [];
 	let gameMode = false;
-	let score = 0;
-	let combo = 0;
-	let lastCatchTime = - 10;
 	let elapsedTime = 0;
 
 	function pickStarlightAnchor( out, avoid ) {
@@ -152,16 +173,6 @@ export async function createSnowAndLightExperience( {
 		}
 
 		return out;
-
-	}
-
-	function notifyScore() {
-
-		if ( onScoreChange ) {
-
-			onScoreChange( { score, combo, active: gameMode, label: 'Starlight Hunt' } );
-
-		}
 
 	}
 
@@ -196,18 +207,15 @@ export async function createSnowAndLightExperience( {
 				if ( ! gameMode ) return;
 
 				const hitPos = holder.position.clone();
-				combo = ( elapsedTime - lastCatchTime ) < 3.4 ? combo + 1 : 1;
-				lastCatchTime = elapsedTime;
-				score += 10 * combo;
+				const pan = THREE.MathUtils.clamp( hitPos.x / Math.max( 1.5, frame.halfWidth ), - 0.85, 0.85 );
 
 				swarm.triggerFrostGust( hitPos, 1.35 );
 				studio.flashGust( 1.0 );
+				if ( audio ) audio.triggerChime( pan, 0.72 );
 
 				pickStarlightAnchor( beacon.anchor, collider.position );
 				beacon.bornAt = elapsedTime;
 				holder.position.copy( beacon.anchor );
-
-				notifyScore();
 
 			}
 		} );
@@ -257,6 +265,30 @@ export async function createSnowAndLightExperience( {
 
 		}
 
+		if ( audio ) {
+
+			const activeUserSpeed = collider.autopilot < 0.75 ? Math.min( 2.0, collider.pointer.speed * 0.22 ) : 0;
+			if ( collider.autopilot < 0.75 && activeUserSpeed < 0.12 ) {
+
+				stillWarmAccum = Math.min( 1, stillWarmAccum + dt * 0.35 );
+
+			} else {
+
+				stillWarmAccum = Math.max( 0, stillWarmAccum - dt * 0.75 );
+
+			}
+
+			audio.updateTelemetry( {
+				speed: activeUserSpeed,
+				pan: THREE.MathUtils.clamp( collider.pointer.ndc.x * 0.85, - 0.85, 0.85 ),
+				pressure: collider.radiusScale,
+				breath: breathEnergy,
+				vortex: effectiveVortex,
+				stillGlow: stillWarmAccum
+			}, dt );
+
+		}
+
 	} );
 
 	engine.setPostStateProvider( () => ( {
@@ -268,6 +300,14 @@ export async function createSnowAndLightExperience( {
 
 	engine.start();
 
+	function fireFrostGust() {
+
+		swarm.triggerFrostGust( collider.position, 1.25 );
+		studio.flashGust( 1.0 );
+		if ( audio ) audio.triggerGust( THREE.MathUtils.clamp( collider.pointer.ndc.x * 0.85, - 0.85, 0.85 ) );
+
+	}
+
 	return {
 		engine,
 		collider,
@@ -276,14 +316,14 @@ export async function createSnowAndLightExperience( {
 		swarm,
 		setFieldMode( mode ) {
 
-			const next = mode === 'vortex' ? 'vortex' : 'repel';
-			swarm.setFieldMode( next );
-			orbVisuals.setVortexMode( next === 'vortex' );
+			userFieldMode = mode === 'vortex' ? 'vortex' : 'repel';
+			syncVortexState( false );
 
 		},
 		setBlizzardDrift( scale ) {
 
-			swarm.setBlizzardDrift( scale );
+			userBlizzardDrift = scale;
+			swarm.setBlizzardDrift( userBlizzardDrift + breathEnergy * 1.35 );
 
 		},
 		setFrozenRays( scale ) {
@@ -294,24 +334,16 @@ export async function createSnowAndLightExperience( {
 		},
 		setFieldRadius( scale ) {
 
-			const clamped = Math.max( 0.5, Math.min( 2.2, scale ) );
-			collider.baseRadius = config.orb.shieldRadius * clamped;
-			orbVisuals.setFieldRadiusScale( clamped );
+			userFieldRadius = Math.max( 0.5, Math.min( 2.2, scale ) );
+			collider.baseRadius = config.orb.shieldRadius * userFieldRadius;
+			orbVisuals.setFieldRadiusScale( userFieldRadius );
 
 		},
-		triggerFrostGust() {
-
-			swarm.triggerFrostGust( collider.position, 1.25 );
-			studio.flashGust( 1.0 );
-
-		},
+		triggerFrostGust: fireFrostGust,
 		setGameMode( active ) {
 
 			gameMode = !! active;
 			beaconGroup.visible = gameMode;
-			score = 0;
-			combo = 0;
-			lastCatchTime = - 10;
 
 			for ( const b of beacons ) {
 
@@ -326,7 +358,89 @@ export async function createSnowAndLightExperience( {
 
 			}
 
-			notifyScore();
+		},
+		applyBreath( breath ) {
+
+			if ( ! breath || ! breath.active ) {
+
+				breathEnergy = 0;
+				swarm.setBlizzardDrift( userBlizzardDrift );
+				if ( breathSteerActive && ! handDriverActive ) {
+
+					breathSteerActive = false;
+					collider.setExternalDriver( null );
+
+				}
+				return;
+
+			}
+
+			breathEnergy = breath.energy;
+			swarm.setBlizzardDrift( userBlizzardDrift + breathEnergy * 1.45 );
+
+			if ( breath.puff ) fireFrostGust();
+
+			if ( breath.mode === 'steer' && breath.energy > 0.08 && ! handDriverActive ) {
+
+				breathSteerActive = true;
+				collider.setExternalDriver( {
+					active: true,
+					ndcX: breath.steerX,
+					ndcY: breath.steerY,
+					radiusMul: 0.92 + breath.energy * 0.72,
+					pressed: breath.energy > 0.48,
+					suppressMouseHover: false
+				} );
+
+			} else if ( breathSteerActive && ! handDriverActive ) {
+
+				breathSteerActive = false;
+				collider.setExternalDriver( null );
+
+			}
+
+		},
+		applyHands( hand ) {
+
+			if ( ! hand || ! hand.enabled || ! hand.detected ) {
+
+				if ( handDriverActive ) {
+
+					handDriverActive = false;
+					collider.setExternalDriver( null );
+					orbVisuals.setFieldRadiusScale( userFieldRadius );
+					syncVortexState( false );
+
+				}
+				return;
+
+			}
+
+			handDriverActive = true;
+			breathSteerActive = false;
+
+			// Pinch or closed fist temporarily engages magnetic Crystal Vortex; opening releases a sparkling gust!
+			const holdVortex = hand.isPinched || hand.posture === 'fist';
+			syncVortexState( holdVortex );
+
+			if ( hand.pinchJustReleased || hand.sweepTriggered ) {
+
+				fireFrostGust();
+
+			}
+
+			// Z-axis distance to camera & single-finger vs. open-palm scale both physical radius and orb visual size
+			const effectiveRadiusMul = THREE.MathUtils.clamp( hand.radiusScale, 0.52, 2.0 );
+			orbVisuals.setFieldRadiusScale( THREE.MathUtils.clamp( userFieldRadius * effectiveRadiusMul, 0.48, 2.2 ) );
+
+			collider.setExternalDriver( {
+				active: true,
+				ndcX: hand.ndcX,
+				ndcY: hand.ndcY,
+				radiusMul: effectiveRadiusMul,
+				pressed: holdVortex,
+				suppressMouseHover: true
+			} );
 
 		},
 		dispose: () => engine.dispose()

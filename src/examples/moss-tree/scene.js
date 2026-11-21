@@ -19,7 +19,7 @@ import { createDandelionSystem } from './dandelion.js';
 // Demonstrates how to build an organic, tactile WebGPU + TSL interactive scene
 // (plus an optional Bloom Hunt collision mini-game) on top of `src/engine`.
 
-export async function createMossTreeExperience( { container, config = MOSS_CONFIG, onScoreChange = null } ) {
+export async function createMossTreeExperience( { container, config = MOSS_CONFIG, audio = null } ) {
 
 	const engine = await createCollisionEngine( {
 		container,
@@ -109,6 +109,11 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 		idleAfter: config.collider.idleAfter,
 		chargeScale: config.collider.chargeScale,
 		initialPosition: new THREE.Vector3( - 0.15, 0.18, 0.65 ),
+		onPress: ( nx ) => {
+
+			if ( audio ) audio.triggerPlink( THREE.MathUtils.clamp( nx * 0.85, - 0.85, 0.85 ), 0.68 );
+
+		},
 		wanderFn: ( t, bounds, out, outNorm ) => {
 
 			// Graceful idle figure-8 that strokes both the mossy trunk & the sunlit pappus clearing
@@ -265,9 +270,6 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 
 	const buds = [];
 	let gameEnabled = false;
-	let score = 0;
-	let combo = 0;
-	let lastHitTime = - 10;
 
 	const placeBud = ( bud ) => {
 
@@ -303,18 +305,15 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 			radius: 0.14,
 			enabled: false,
 			cooldown: 0.45,
-			onImpact: ( ev ) => {
+			onImpact: () => {
 
 				if ( ! gameEnabled ) return;
-				combo = ( ev.time - lastHitTime ) < 2.6 ? combo + 1 : 1;
-				lastHitTime = ev.time;
-				score += 10 * combo;
 
-				// Emit a physical + luminous shockwave across the GPU moss & spores!
+				const pan = THREE.MathUtils.clamp( bud.anchor.x * 0.55, - 0.85, 0.85 );
+				// Emit a serene luminous shockwave & warm pentatonic chime (zero score pressure)
 				moss.triggerPulse( bud.anchor, 1.45 );
+				if ( audio ) audio.triggerChime( pan, 0.72 );
 				placeBud( bud );
-
-				if ( onScoreChange ) onScoreChange( { score, combo, active: gameEnabled } );
 
 			}
 		} );
@@ -331,6 +330,21 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 		windScale: 1.0,
 		activationDecay: config.moss.activationDecay
 	};
+
+	let breathEnergy = 0;
+	let handOpenBoost = 0;
+	let handDriverActive = false;
+	let breathSteerActive = false;
+	let slowGlideAccum = 0;
+
+	function syncWindUniforms() {
+
+		const totalScale = controls.windScale * ( 1 + breathEnergy * 1.45 + handOpenBoost * 0.55 );
+		dandelions.uniforms.flowAmplitude.value = config.dandelion.flowAmplitude * totalScale;
+		dandelions.uniforms.prevailingWind.value.fromArray( config.dandelion.prevailingWind ).multiplyScalar( totalScale );
+		moss.uniforms.breezeAmp.value = config.moss.breezeAmp * ( controls.windScale + breathEnergy * 1.15 );
+
+	}
 
 	const smoothedFocusPos = new THREE.Vector3( - 0.1, 0.05, 0.62 );
 	let reveal = 0;
@@ -349,15 +363,15 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 		const chargeBoost = 1 + ( collider.radiusScale - 1 ) * 0.75;
 		const breathe = 0.92 + 0.08 * Math.sin( time * 2.6 );
 
-		cursorLight.intensity = config.collider.lightIntensity * eased * breathe * chargeBoost * ( 0.72 + speedFactor * 0.45 );
-		uHaloGlow.value = eased * ( 0.22 + speedFactor * 0.45 + ( collider.radiusScale - 1 ) * 0.65 );
+		cursorLight.intensity = config.collider.lightIntensity * eased * breathe * chargeBoost * ( 0.72 + speedFactor * 0.45 + breathEnergy * 0.28 );
+		uHaloGlow.value = eased * ( 0.22 + speedFactor * 0.45 + ( collider.radiusScale - 1 ) * 0.65 + breathEnergy * 0.25 );
 		uHaloScale.value = collider.radiusScale;
 
 		// Update volumetric canopy shafts
 		mainShaft.update( eased );
 		sideShaft.update( eased );
 
-		// Gently animate Bloom Hunt dew-buds when enabled
+		// Gently animate Drift Blooms dew-buds when enabled
 		if ( gameEnabled ) {
 
 			for ( const b of buds ) {
@@ -377,6 +391,30 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 			? collider.position
 			: tmpWanderPos.set( - 0.12, 0.02, 0.64 );
 		smoothedFocusPos.lerp( focusGoal, 1 - Math.exp( - dt * 5.0 ) );
+
+		// Feed scene-consistent audio telemetry (independent of input modality)
+		if ( audio ) {
+
+			const activeUserSpeed = collider.autopilot < 0.75 ? Math.min( 2.0, collider.pointer.speed * 0.26 ) : 0;
+			if ( activeUserSpeed > 0.06 && activeUserSpeed < 0.42 ) {
+
+				slowGlideAccum = Math.min( 1, slowGlideAccum + dt * 0.35 );
+
+			} else {
+
+				slowGlideAccum = Math.max( 0, slowGlideAccum - dt * 0.65 );
+
+			}
+
+			audio.updateTelemetry( {
+				speed: activeUserSpeed,
+				pan: THREE.MathUtils.clamp( collider.pointer.ndc.x * 0.85, - 0.85, 0.85 ),
+				pressure: collider.radiusScale,
+				breath: breathEnergy,
+				slowGlide: slowGlideAccum
+			}, dt );
+
+		}
 
 	} );
 
@@ -410,9 +448,7 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 	function setWindScale( scale ) {
 
 		controls.windScale = scale;
-		dandelions.uniforms.flowAmplitude.value = config.dandelion.flowAmplitude * scale;
-		dandelions.uniforms.prevailingWind.value.fromArray( config.dandelion.prevailingWind ).multiplyScalar( scale );
-		moss.uniforms.breezeAmp.value = config.moss.breezeAmp * scale;
+		syncWindUniforms();
 
 	}
 
@@ -437,20 +473,92 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 
 		}
 
-		if ( gameEnabled ) {
-
-			score = 0;
-			combo = 0;
-
-		}
-
-		if ( onScoreChange ) onScoreChange( { score, combo, active: gameEnabled } );
-
 	}
 
 	function triggerPulse() {
 
 		moss.triggerPulse( collider.position, 1.35 );
+		if ( audio ) audio.triggerPulse( THREE.MathUtils.clamp( collider.pointer.ndc.x * 0.85, - 0.85, 0.85 ) );
+
+	}
+
+	function applyBreath( breath ) {
+
+		if ( ! breath || ! breath.active ) {
+
+			breathEnergy = 0;
+			syncWindUniforms();
+			if ( breathSteerActive && ! handDriverActive ) {
+
+				breathSteerActive = false;
+				collider.setExternalDriver( null );
+
+			}
+			return;
+
+		}
+
+		breathEnergy = breath.energy;
+		syncWindUniforms();
+
+		if ( breath.puff ) triggerPulse();
+
+		if ( breath.mode === 'steer' && breath.energy > 0.08 && ! handDriverActive ) {
+
+			breathSteerActive = true;
+			collider.setExternalDriver( {
+				active: true,
+				ndcX: breath.steerX,
+				ndcY: breath.steerY,
+				radiusMul: 0.9 + breath.energy * 0.65,
+				pressed: breath.energy > 0.45,
+				suppressMouseHover: false
+			} );
+
+		} else if ( breathSteerActive && ! handDriverActive ) {
+
+			breathSteerActive = false;
+			collider.setExternalDriver( null );
+
+		}
+
+	}
+
+	function applyHands( hand ) {
+
+		if ( ! hand || ! hand.enabled || ! hand.detected ) {
+
+			handOpenBoost = 0;
+			syncWindUniforms();
+			if ( handDriverActive ) {
+
+				handDriverActive = false;
+				collider.setExternalDriver( null );
+
+			}
+			return;
+
+		}
+
+		handDriverActive = true;
+		breathSteerActive = false;
+		handOpenBoost = hand.posture === 'open' ? ( 0.45 + hand.proximity * 0.75 ) : 0;
+		syncWindUniforms();
+
+		if ( hand.pinchJustStarted || hand.sweepTriggered ) {
+
+			triggerPulse();
+
+		}
+
+		collider.setExternalDriver( {
+			active: true,
+			ndcX: hand.ndcX,
+			ndcY: hand.ndcY,
+			radiusMul: hand.radiusScale,
+			pressed: hand.isPinched || hand.posture === 'fist',
+			suppressMouseHover: true
+		} );
 
 	}
 
@@ -469,6 +577,8 @@ export async function createMossTreeExperience( { container, config = MOSS_CONFI
 		setActivationPersistence,
 		setGameMode,
 		triggerPulse,
+		applyBreath,
+		applyHands,
 		dispose: () => engine.dispose()
 	};
 

@@ -110,6 +110,7 @@ export async function createSnowAndLightExperience( {
 	let breathEnergy = 0;
 	let handDriverActive = false;
 	let breathSteerActive = false;
+	let prevHandVortexHold = false;
 	let stillWarmAccum = 0;
 
 	function syncVortexState( handPinchOrFist = false ) {
@@ -407,8 +408,10 @@ export async function createSnowAndLightExperience( {
 				if ( handDriverActive ) {
 
 					handDriverActive = false;
+					prevHandVortexHold = false;
 					collider.setExternalDriver( null );
 					orbVisuals.setFieldRadiusScale( userFieldRadius );
+					swarm.setBlizzardDrift( userBlizzardDrift + breathEnergy * 1.45 );
 					syncVortexState( false );
 
 				}
@@ -419,18 +422,24 @@ export async function createSnowAndLightExperience( {
 			handDriverActive = true;
 			breathSteerActive = false;
 
-			// Pinch or closed fist temporarily engages magnetic Crystal Vortex; opening releases a sparkling gust!
+			// Pinch or closed fist pulls crystals into magnetic Crystal Vortex; opening your hand bursts them outward!
 			const holdVortex = hand.isPinched || hand.posture === 'fist';
+			const justOpenedFromHold = prevHandVortexHold && ! holdVortex && hand.posture === 'open';
+			prevHandVortexHold = holdVortex;
 			syncVortexState( holdVortex );
 
-			if ( hand.pinchJustReleased || hand.sweepTriggered ) {
+			if ( hand.pinchJustReleased || justOpenedFromHold || hand.sweepTriggered ) {
 
 				fireFrostGust();
 
 			}
 
+			// Open palm adds a living aurora breeze lift across the snowfall
+			const openDriftBoost = hand.posture === 'open' ? ( 0.35 + hand.proximity * 0.55 ) : 0;
+			swarm.setBlizzardDrift( userBlizzardDrift + breathEnergy * 1.45 + openDriftBoost );
+
 			// Z-axis distance to camera & single-finger vs. open-palm scale both physical radius and orb visual size
-			const effectiveRadiusMul = THREE.MathUtils.clamp( hand.radiusScale, 0.52, 2.0 );
+			const effectiveRadiusMul = THREE.MathUtils.clamp( hand.radiusScale, 0.50, 2.1 );
 			orbVisuals.setFieldRadiusScale( THREE.MathUtils.clamp( userFieldRadius * effectiveRadiusMul, 0.48, 2.2 ) );
 
 			collider.setExternalDriver( {

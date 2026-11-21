@@ -1,6 +1,7 @@
 // Lazy-loaded MediaPipe HandLandmarker webcam input with One Euro smoothing,
-// independent 5-digit finger tracking, Z-axis camera-distance proximity (pressure/size),
-// and distinct gestures (single finger vs. open palm vs. pinch/fist).
+// independent 5-digit 3D-aware finger tracking, Z-axis camera-distance proximity,
+// distinct postures (single finger vs. open hand vs. pinch/fist), and a whisper-soft
+// full-screen ambient ghost-glass camera & luminous fingertip overlay.
 //
 // Zero network cost until toggled On; tearing down stops all camera MediaStreamTracks.
 
@@ -89,6 +90,13 @@ function dist2( a, b ) {
 
 }
 
+function dist3( a, b ) {
+
+	const dz = ( a.z || 0 ) - ( b.z || 0 );
+	return Math.hypot( a.x - b.x, a.y - b.y, dz );
+
+}
+
 function clamp( x, lo, hi ) {
 
 	return x < lo ? lo : ( x > hi ? hi : x );
@@ -105,22 +113,22 @@ export function createHandInput() {
 	let lastVideoTime = - 1;
 	let lastDetectMs = 0;
 
-	// Minimal bottom-left frosted constellation pill (no raw camera video)
-	let overlay = null;
-	let canvas2d = null;
-	let ctx2d = null;
-	let labelEl = null;
+	// Full-screen ambient ghost-glass camera veil + 1:1 luminous fingertip/skeleton overlay
+	let stageCanvas = null;
+	let stageCtx = null;
+	let statusChip = null;
+	let resizeListener = null;
 
 	// Per-hand smoothers (up to 2 hands x 5 fingertips + palm center + Z proximity)
 	const handFilters = [ 0, 1 ].map( () => ( {
-		palmX: new OneEuroFilter( 1.3, 0.06 ),
-		palmY: new OneEuroFilter( 1.3, 0.06 ),
-		prox: new OneEuroFilter( 0.9, 0.02 ),
+		palmX: new OneEuroFilter( 1.35, 0.065 ),
+		palmY: new OneEuroFilter( 1.35, 0.065 ),
+		prox: new OneEuroFilter( 1.0, 0.025 ),
 		pinch: new OneEuroFilter( 1.8, 0.05 ),
 		isPinched: false,
 		tips: FINGER_SPECS.map( () => ( {
-			x: new OneEuroFilter( 1.5, 0.075 ),
-			y: new OneEuroFilter( 1.5, 0.075 )
+			x: new OneEuroFilter( 1.6, 0.08 ),
+			y: new OneEuroFilter( 1.6, 0.08 )
 		} ) )
 	} ) );
 
@@ -130,7 +138,7 @@ export function createHandInput() {
 	let lastSweepMs = - Infinity;
 	let lastPinchEdge = false;
 	let lastHandSeenMs = - Infinity;
-	let lastRawLandmarks = [];
+	let lastParsedHands = [];
 
 	// Reusable live state snapshot returned to scenes every frame
 	const state = {
@@ -138,173 +146,296 @@ export function createHandInput() {
 		loading: false,
 		detected: false,
 		handCount: 0,
-		// Primary hand mirrored screen coords [0..1] & NDC [-1..1]
 		x: 0.5,
 		y: 0.5,
 		ndcX: 0,
 		ndcY: 0,
-		// Z-axis proximity to camera [0 = far, 1 = close]
 		proximity: 0.45,
-		// Derived interaction scales driven by Z proximity & posture
 		pressureScale: 1.0,
 		radiusScale: 1.0,
-		// Gesture posture: 'none' | 'point' | 'multi' | 'open' | 'pinch' | 'fist'
 		posture: 'none',
 		openCount: 0,
 		isPinched: false,
 		pinchJustStarted: false,
 		pinchJustReleased: false,
 		sweepTriggered: false,
-		// Up to 5 independently tracked active digits across 1–2 hands
 		digits: []
 	};
 
+	function sizeStageCanvas() {
+
+		if ( ! stageCanvas ) return;
+		const dpr = Math.min( window.devicePixelRatio || 1, 1.5 );
+		const w = Math.max( 1, Math.round( window.innerWidth * dpr ) );
+		const h = Math.max( 1, Math.round( window.innerHeight * dpr ) );
+		if ( stageCanvas.width !== w || stageCanvas.height !== h ) {
+
+			stageCanvas.width = w;
+			stageCanvas.height = h;
+
+		}
+
+	}
+
 	function ensureOverlay() {
 
-		if ( overlay ) return;
+		if ( stageCanvas ) return;
 
-		overlay = document.createElement( 'div' );
-		overlay.id = 'hand-constellation';
-		overlay.style.cssText = [
+		// Full-screen ambient translucent camera reflection + 1:1 fingertip aura canvas
+		stageCanvas = document.createElement( 'canvas' );
+		stageCanvas.id = 'hand-stage-overlay';
+		stageCanvas.style.cssText = [
+			'position:fixed',
+			'inset:0',
+			'width:100%',
+			'height:100%',
+			'z-index:4',
+			'pointer-events:none',
+			'mix-blend-mode:screen'
+		].join( ';' );
+		document.body.appendChild( stageCanvas );
+		stageCtx = stageCanvas.getContext( '2d' );
+		sizeStageCanvas();
+
+		resizeListener = () => sizeStageCanvas();
+		window.addEventListener( 'resize', resizeListener, { passive: true } );
+
+		// Subtle bottom-left status chip indicating live posture & Z proximity
+		statusChip = document.createElement( 'div' );
+		statusChip.id = 'hand-status-chip';
+		statusChip.style.cssText = [
 			'position:fixed',
 			'left:max(16px, env(safe-area-inset-left))',
 			'bottom:max(16px, env(safe-area-inset-bottom))',
 			'z-index:11',
-			'width:142px',
-			'padding:8px 8px 6px',
+			'padding:7px 12px',
 			'border-radius:12px',
 			'background:var(--glass)',
 			'border:1px solid var(--glass-border)',
 			'backdrop-filter:blur(14px)',
 			'-webkit-backdrop-filter:blur(14px)',
-			'box-shadow:0 10px 30px rgba(0,0,0,0.34)',
+			'box-shadow:0 10px 28px rgba(0,0,0,0.34)',
+			'color:var(--text)',
+			'font-size:12px',
+			'line-height:1.25',
 			'pointer-events:none',
-			'display:flex',
-			'flex-direction:column',
-			'gap:4px',
-			'transition:opacity 0.25s ease'
+			'white-space:nowrap',
+			'font-variant-numeric:tabular-nums'
 		].join( ';' );
-
-		canvas2d = document.createElement( 'canvas' );
-		canvas2d.width = 252;
-		canvas2d.height = 148;
-		canvas2d.style.cssText = 'width:126px;height:74px;display:block;border-radius:6px;background:rgba(0,0,0,0.24);';
-		ctx2d = canvas2d.getContext( '2d' );
-
-		labelEl = document.createElement( 'div' );
-		labelEl.style.cssText = 'font-size:12px;line-height:1.2;color:var(--muted);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-		labelEl.textContent = 'loading hands…';
-
-		overlay.appendChild( canvas2d );
-		overlay.appendChild( labelEl );
-		document.body.appendChild( overlay );
+		statusChip.textContent = 'Hands · loading…';
+		document.body.appendChild( statusChip );
 
 	}
 
 	function removeOverlay() {
 
-		if ( overlay && overlay.parentNode ) overlay.parentNode.removeChild( overlay );
-		overlay = null;
-		canvas2d = null;
-		ctx2d = null;
-		labelEl = null;
+		if ( resizeListener ) {
+
+			window.removeEventListener( 'resize', resizeListener );
+			resizeListener = null;
+
+		}
+		if ( stageCanvas && stageCanvas.parentNode ) stageCanvas.parentNode.removeChild( stageCanvas );
+		if ( statusChip && statusChip.parentNode ) statusChip.parentNode.removeChild( statusChip );
+		stageCanvas = null;
+		stageCtx = null;
+		statusChip = null;
 
 	}
 
-	function drawConstellation( handsData ) {
+	// Cover-fit mapping so mirrored webcam video & normalized [0..1] landmarks align 1:1 on screen
+	function computeCoverRect( W, H ) {
 
-		if ( ! ctx2d || ! canvas2d || ! labelEl ) return;
+		const vw = ( video && video.videoWidth ) || 640;
+		const vh = ( video && video.videoHeight ) || 360;
+		const scale = Math.max( W / vw, H / vh );
+		const drawW = vw * scale;
+		const drawH = vh * scale;
+		return {
+			x: ( W - drawW ) * 0.5,
+			y: ( H - drawH ) * 0.5,
+			w: drawW,
+			h: drawH
+		};
 
-		const W = canvas2d.width;
-		const H = canvas2d.height;
-		ctx2d.clearRect( 0, 0, W, H );
+	}
 
-		const accent = getComputedStyle( document.body ).getPropertyValue( '--accent' ).trim() || '#a6ea57';
-		const warm = getComputedStyle( document.body ).getPropertyValue( '--accent-warm' ).trim() || '#f6dc7a';
+	function drawAmbientStageOverlay( handsData ) {
 
-		if ( loading ) {
+		if ( ! stageCtx || ! stageCanvas ) return;
 
-			labelEl.textContent = 'loading hands…';
-			return;
+		const W = stageCanvas.width;
+		const H = stageCanvas.height;
+		const dpr = W / Math.max( 1, window.innerWidth );
+		stageCtx.clearRect( 0, 0, W, H );
+
+		const styles = getComputedStyle( document.body );
+		const accent = styles.getPropertyValue( '--accent' ).trim() || '#a6ea57';
+		const warm = styles.getPropertyValue( '--accent-warm' ).trim() || '#f6dc7a';
+
+		// 1. Whisper-soft ambient ghost-glass reflection of what the webcam sees
+		if ( video && video.readyState >= 2 ) {
+
+			const cover = computeCoverRect( W, H );
+			stageCtx.save();
+			stageCtx.globalAlpha = 0.13;
+			stageCtx.filter = 'grayscale(0.75) contrast(1.22) brightness(0.92) blur(1.2px)';
+			stageCtx.translate( W, 0 );
+			stageCtx.scale( - 1, 1 );
+			stageCtx.drawImage( video, cover.x, cover.y, cover.w, cover.h );
+			stageCtx.restore();
+
+			// Soft edge vignette so the ambient camera reflection melts seamlessly into the frame
+			stageCtx.save();
+			stageCtx.globalCompositeOperation = 'destination-in';
+			const vig = stageCtx.createRadialGradient(
+				W * 0.5, H * 0.5, Math.min( W, H ) * 0.22,
+				W * 0.5, H * 0.5, Math.max( W, H ) * 0.68
+			);
+			vig.addColorStop( 0, 'rgba(255,255,255,1)' );
+			vig.addColorStop( 0.72, 'rgba(255,255,255,0.68)' );
+			vig.addColorStop( 1, 'rgba(255,255,255,0.12)' );
+			stageCtx.fillStyle = vig;
+			stageCtx.fillRect( 0, 0, W, H );
+			stageCtx.restore();
 
 		}
 
-		if ( ! handsData || handsData.length === 0 ) {
+		// 2. Full-screen 1:1 luminous skeletal filaments, palm Z-depth halo, and per-digit fingertip rings
+		if ( handsData && handsData.length > 0 ) {
 
-			labelEl.textContent = 'show hand';
-			return;
+			const cover = computeCoverRect( W, H );
+			const mapX = ( mirX ) => cover.x + mirX * cover.w;
+			const mapY = ( rawY ) => cover.y + rawY * cover.h;
 
-		}
+			for ( let hi = 0; hi < handsData.length; hi ++ ) {
 
-		for ( let hi = 0; hi < handsData.length; hi ++ ) {
+				const hd = handsData[ hi ];
+				const lms = hd.raw;
 
-			const hd = handsData[ hi ];
-			const lms = hd.raw;
+				// Delicate gossamer hand filaments
+				stageCtx.save();
+				stageCtx.strokeStyle = accent;
+				stageCtx.globalAlpha = 0.24;
+				stageCtx.lineWidth = 1.5 * dpr;
+				stageCtx.lineCap = 'round';
+				stageCtx.beginPath();
+				for ( const [ a, b ] of HAND_EDGES ) {
 
-			// Draw delicate skeletal filaments (mirrored X)
-			ctx2d.strokeStyle = 'rgba(255,255,255,0.26)';
-			ctx2d.lineWidth = 2;
-			ctx2d.beginPath();
-			for ( const [ a, b ] of HAND_EDGES ) {
+					const pa = lms[ a ];
+					const pb = lms[ b ];
+					stageCtx.moveTo( mapX( 1 - pa.x ), mapY( pa.y ) );
+					stageCtx.lineTo( mapX( 1 - pb.x ), mapY( pb.y ) );
 
-				const pa = lms[ a ];
-				const pb = lms[ b ];
-				ctx2d.moveTo( ( 1 - pa.x ) * W, pa.y * H );
-				ctx2d.lineTo( ( 1 - pb.x ) * W, pb.y * H );
+				}
+				stageCtx.stroke();
+
+				// Palm Z-axis distance pressure aura
+				const px = mapX( hd.palmX );
+				const py = mapY( hd.palmY );
+				const palmR = ( 22 + hd.proximity * 54 ) * dpr;
+				const palmGrad = stageCtx.createRadialGradient( px, py, 0, px, py, palmR );
+				palmGrad.addColorStop( 0, hd.posture === 'fist' || hd.isPinched ? warm : accent );
+				palmGrad.addColorStop( 1, 'rgba(0,0,0,0)' );
+				stageCtx.globalAlpha = hd.posture === 'fist' || hd.isPinched ? 0.32 : 0.16;
+				stageCtx.fillStyle = palmGrad;
+				stageCtx.beginPath();
+				stageCtx.arc( px, py, palmR, 0, Math.PI * 2 );
+				stageCtx.fill();
+
+				// Crisp outer Z-pressure ring around palm
+				stageCtx.globalAlpha = 0.26 + hd.proximity * 0.34;
+				stageCtx.strokeStyle = hd.posture === 'fist' || hd.isPinched ? warm : accent;
+				stageCtx.lineWidth = 1.35 * dpr;
+				stageCtx.beginPath();
+				stageCtx.arc( px, py, palmR * 0.72, 0, Math.PI * 2 );
+				stageCtx.stroke();
+
+				// Individual luminous fingertip nodes & active halos
+				for ( let fi = 0; fi < FINGER_SPECS.length; fi ++ ) {
+
+					const f = hd.fingers[ fi ];
+					const fx = mapX( f.x );
+					const fy = mapY( f.y );
+					const isActiveTip = f.extended || ( hd.isPinched && fi <= 1 );
+
+					if ( isActiveTip ) {
+
+						const haloR = ( ( hd.posture === 'point' ? 14 : 18 ) + hd.proximity * 16 ) * dpr;
+						const tipGrad = stageCtx.createRadialGradient( fx, fy, 0, fx, fy, haloR );
+						tipGrad.addColorStop( 0, hd.isPinched && fi <= 1 ? warm : accent );
+						tipGrad.addColorStop( 1, 'rgba(0,0,0,0)' );
+						stageCtx.globalAlpha = 0.45;
+						stageCtx.fillStyle = tipGrad;
+						stageCtx.beginPath();
+						stageCtx.arc( fx, fy, haloR, 0, Math.PI * 2 );
+						stageCtx.fill();
+
+						stageCtx.globalAlpha = 0.88;
+						stageCtx.fillStyle = warm;
+						stageCtx.beginPath();
+						stageCtx.arc( fx, fy, ( 3.4 + hd.proximity * 2.2 ) * dpr, 0, Math.PI * 2 );
+						stageCtx.fill();
+
+					} else {
+
+						stageCtx.globalAlpha = 0.28;
+						stageCtx.fillStyle = accent;
+						stageCtx.beginPath();
+						stageCtx.arc( fx, fy, 2.2 * dpr, 0, Math.PI * 2 );
+						stageCtx.fill();
+
+					}
+
+				}
+
+				stageCtx.restore();
 
 			}
-			ctx2d.stroke();
-
-			// Draw subtle Z-proximity aura around palm center
-			const px = hd.palmX * W;
-			const py = hd.palmY * H;
-			const auraR = 10 + hd.proximity * 22;
-			ctx2d.strokeStyle = accent;
-			ctx2d.globalAlpha = 0.25 + hd.proximity * 0.45;
-			ctx2d.lineWidth = 2;
-			ctx2d.beginPath();
-			ctx2d.arc( px, py, auraR, 0, Math.PI * 2 );
-			ctx2d.stroke();
-			ctx2d.globalAlpha = 1;
-
-			// Draw all 5 fingertip nodes (lit bright when extended)
-			for ( let fi = 0; fi < FINGER_SPECS.length; fi ++ ) {
-
-				const f = hd.fingers[ fi ];
-				const fx = f.x * W;
-				const fy = f.y * H;
-				ctx2d.fillStyle = f.extended ? ( hd.isPinched && fi <= 1 ? warm : accent ) : 'rgba(255,255,255,0.28)';
-				ctx2d.beginPath();
-				ctx2d.arc( fx, fy, f.extended ? ( 4.5 + hd.proximity * 2.5 ) : 2.5, 0, Math.PI * 2 );
-				ctx2d.fill();
-
-			}
 
 		}
 
-		if ( state.handCount > 1 ) {
+		// Update minimal bottom-left posture & depth chip
+		if ( statusChip ) {
 
-			labelEl.textContent = `2 hands · ${ state.digits.length } digits`;
+			if ( loading ) {
 
-		} else if ( state.posture === 'pinch' ) {
+				statusChip.textContent = 'Hands · loading model…';
 
-			labelEl.textContent = 'pinch · charge';
+			} else if ( ! handsData || handsData.length === 0 ) {
 
-		} else if ( state.posture === 'fist' ) {
+				statusChip.textContent = 'Hands · show open palm or finger';
 
-			labelEl.textContent = 'fist · hold';
+			} else {
 
-		} else if ( state.posture === 'point' ) {
+				const depthPct = Math.round( state.proximity * 100 );
+				if ( state.handCount > 1 ) {
 
-			labelEl.textContent = '1 finger · focus';
+					statusChip.textContent = `2 hands · ${ state.digits.length } digits · depth ${ depthPct }%`;
 
-		} else if ( state.posture === 'open' ) {
+				} else if ( state.posture === 'pinch' ) {
 
-			labelEl.textContent = `${ state.openCount } fingers · open`;
+					statusChip.textContent = `Pinch · charge · depth ${ depthPct }%`;
 
-		} else {
+				} else if ( state.posture === 'fist' ) {
 
-			labelEl.textContent = `${ state.openCount } fingers`;
+					statusChip.textContent = `Fist · hold · depth ${ depthPct }%`;
+
+				} else if ( state.posture === 'point' ) {
+
+					statusChip.textContent = `1 finger · pinpoint · depth ${ depthPct }%`;
+
+				} else if ( state.posture === 'open' ) {
+
+					statusChip.textContent = `Open palm · ${ state.openCount } digits · depth ${ depthPct }%`;
+
+				} else {
+
+					statusChip.textContent = `${ state.openCount } fingers · depth ${ depthPct }%`;
+
+				}
+
+			}
 
 		}
 
@@ -318,34 +449,27 @@ export function createHandInput() {
 		const { FilesetResolver, HandLandmarker } = mod;
 		const vision = await FilesetResolver.forVisionTasks( MP_WASM_URL );
 
+		// Lower confidence thresholds (0.35) ensure spread open hands track reliably in dim evening lighting
+		const opts = {
+			baseOptions: {
+				modelAssetPath: MP_MODEL_URL,
+				delegate: 'GPU'
+			},
+			runningMode: 'VIDEO',
+			numHands: 2,
+			minHandDetectionConfidence: 0.35,
+			minHandPresenceConfidence: 0.35,
+			minTrackingConfidence: 0.35
+		};
+
 		try {
 
-			landmarker = await HandLandmarker.createFromOptions( vision, {
-				baseOptions: {
-					modelAssetPath: MP_MODEL_URL,
-					delegate: 'GPU'
-				},
-				runningMode: 'VIDEO',
-				numHands: 2,
-				minHandDetectionConfidence: 0.55,
-				minHandPresenceConfidence: 0.50,
-				minTrackingConfidence: 0.50
-			} );
+			landmarker = await HandLandmarker.createFromOptions( vision, opts );
 
 		} catch {
 
-			// Graceful fallback if WebGL/GPU delegate isn't available on this device
-			landmarker = await HandLandmarker.createFromOptions( vision, {
-				baseOptions: {
-					modelAssetPath: MP_MODEL_URL,
-					delegate: 'CPU'
-				},
-				runningMode: 'VIDEO',
-				numHands: 2,
-				minHandDetectionConfidence: 0.55,
-				minHandPresenceConfidence: 0.50,
-				minTrackingConfidence: 0.50
-			} );
+			opts.baseOptions.delegate = 'CPU';
+			landmarker = await HandLandmarker.createFromOptions( vision, opts );
 
 		}
 
@@ -365,11 +489,10 @@ export function createHandInput() {
 		loading = true;
 		state.loading = true;
 		ensureOverlay();
-		drawConstellation( null );
+		drawAmbientStageOverlay( null );
 
 		try {
 
-			// Request low-bandwidth 640x360 stream (plenty for MediaPipe landmarks, ultra-low CPU/GPU impact)
 			const [ mediaStream ] = await Promise.all( [
 				navigator.mediaDevices.getUserMedia( {
 					video: {
@@ -407,12 +530,12 @@ export function createHandInput() {
 			prevPrimaryY = null;
 			prevSampleSec = null;
 			lastPinchEdge = false;
-			lastRawLandmarks = [];
+			lastParsedHands = [];
 			active = true;
 			state.enabled = true;
 			loading = false;
 			state.loading = false;
-			drawConstellation( null );
+			drawAmbientStageOverlay( null );
 			return true;
 
 		} catch ( err ) {
@@ -441,6 +564,7 @@ export function createHandInput() {
 		state.pinchJustReleased = false;
 		state.sweepTriggered = false;
 		state.digits = [];
+		lastParsedHands = [];
 
 		if ( video ) {
 
@@ -476,7 +600,7 @@ export function createHandInput() {
 		const palmLen = dist2( wrist, middleMCP );
 		const palmWid = dist2( indexMCP, pinkyMCP );
 		const palmSize = Math.max( 0.04, 0.55 * palmLen + 0.45 * palmWid );
-		const rawProx = clamp( ( palmSize - 0.095 ) / 0.19, 0, 1 );
+		const rawProx = clamp( ( palmSize - 0.09 ) / 0.19, 0, 1 );
 		const proximity = hf.prox.filter( rawProx, tSec );
 
 		// Mirrored palm center (wrist + knuckle centroid)
@@ -485,7 +609,7 @@ export function createHandInput() {
 		const palmX = clamp( hf.palmX.filter( rawPalmX, tSec ), 0, 1 );
 		const palmY = clamp( hf.palmY.filter( rawPalmY, tSec ), 0, 1 );
 
-		// Independent 5-digit extension detection + One Euro smoothed coordinates
+		// 3D-aware independent 5-digit extension detection (works even when fingers tilt toward camera)
 		const fingers = [];
 		let openCount = 0;
 
@@ -499,18 +623,26 @@ export function createHandInput() {
 			let extended;
 			if ( fi === 0 ) {
 
-				// Thumb extension: tip reaches well outside palm width relative to IP & index knuckle
-				const dTipPinky = dist2( tip, pinkyMCP );
-				const dIpPinky = dist2( pip, pinkyMCP );
-				const dTipIdx = dist2( tip, indexMCP );
-				extended = dTipPinky > dIpPinky * 1.07 && dTipIdx > palmSize * 0.46;
+				const dTipPinky = dist3( tip, pinkyMCP );
+				const dIpPinky = dist3( pip, pinkyMCP );
+				const dTipIdx = dist3( tip, indexMCP );
+				extended = dTipPinky > dIpPinky * 1.03 && dTipIdx > palmSize * 0.36;
 
 			} else {
 
-				const dTipWrist = dist2( tip, wrist );
-				const dPipWrist = dist2( pip, wrist );
-				const dMcpWrist = dist2( mcp, wrist );
-				extended = dTipWrist > dPipWrist * 1.11 && dTipWrist > dMcpWrist * 1.24;
+				const dTipWrist = dist3( tip, wrist );
+				const dPipWrist = dist3( pip, wrist );
+				const dMcpWrist = dist3( mcp, wrist );
+
+				// 3D straightness dot product so fingers reaching forward toward the screen still count as extended
+				const v1x = pip.x - mcp.x, v1y = pip.y - mcp.y, v1z = ( pip.z || 0 ) - ( mcp.z || 0 );
+				const v2x = tip.x - pip.x, v2y = tip.y - pip.y, v2z = ( tip.z || 0 ) - ( pip.z || 0 );
+				const l1 = Math.hypot( v1x, v1y, v1z ) || 1e-4;
+				const l2 = Math.hypot( v2x, v2y, v2z ) || 1e-4;
+				const straightDot = ( v1x * v2x + v1y * v2y + v1z * v2z ) / ( l1 * l2 );
+
+				extended = ( dTipWrist > dPipWrist * 1.04 && dTipWrist > dMcpWrist * 1.14 )
+					|| ( straightDot > 0.38 && dTipWrist > dMcpWrist * 1.05 );
 
 			}
 
@@ -531,11 +663,11 @@ export function createHandInput() {
 
 		}
 
-		// Thumb-index pinch normalized to palm size with clean hysteresis
+		// Thumb-index pinch normalized to palm size (only when other fingers aren't fully spread open)
 		const rawPinchRatio = dist2( lms[ 4 ], lms[ 8 ] ) / palmSize;
 		const smoothPinch = hf.pinch.filter( rawPinchRatio, tSec );
-		if ( ! hf.isPinched && smoothPinch < 0.36 ) hf.isPinched = true;
-		else if ( hf.isPinched && smoothPinch > 0.50 ) hf.isPinched = false;
+		if ( ! hf.isPinched && smoothPinch < 0.33 && openCount <= 3 ) hf.isPinched = true;
+		else if ( hf.isPinched && ( smoothPinch > 0.48 || openCount >= 4 ) ) hf.isPinched = false;
 
 		let posture;
 		if ( hf.isPinched ) posture = 'pinch';
@@ -571,7 +703,6 @@ export function createHandInput() {
 		}
 
 		const nowMs = performance.now();
-		// Cap inference cadence to ~30 Hz (matching webcam framerate) to keep WebGPU at 60–120 fps
 		if ( video.currentTime !== lastVideoTime && ( nowMs - lastDetectMs ) >= 26 ) {
 
 			lastVideoTime = video.currentTime;
@@ -589,7 +720,6 @@ export function createHandInput() {
 			}
 
 			const rawHands = ( results && results.landmarks ) ? results.landmarks : [];
-			lastRawLandmarks = rawHands;
 
 			if ( rawHands.length > 0 ) {
 
@@ -602,6 +732,7 @@ export function createHandInput() {
 					parsed.push( analyzeHand( rawHands[ hi ], handFilters[ hi ], tSec ) );
 
 				}
+				lastParsedHands = parsed;
 
 				const primary = parsed[ 0 ];
 				state.detected = true;
@@ -615,23 +746,26 @@ export function createHandInput() {
 				if ( ! primary.isPinched && lastPinchEdge ) state.pinchJustReleased = true;
 				lastPinchEdge = primary.isPinched;
 
-				// Cursor X/Y adapts cleanly to posture:
-				//   - 1 finger ('point'): locked precisely to that extended fingertip
-				//   - pinch: locked to thumb-index midpoint
-				//   - open palm / multi / fist: smooth palm/extended-finger centroid
-				let cx = primary.palmX;
-				let cy = primary.palmY;
+				// Cursor X/Y maps cleanly to viewport cover space
+				const W = window.innerWidth || 1280;
+				const H = window.innerHeight || 800;
+				const cover = computeCoverRect( W, H );
+				const toScreenNormX = ( mx ) => clamp( ( cover.x + mx * cover.w ) / W, 0, 1 );
+				const toScreenNormY = ( ry ) => clamp( ( cover.y + ry * cover.h ) / H, 0, 1 );
+
+				let rawCx = primary.palmX;
+				let rawCy = primary.palmY;
 
 				if ( primary.posture === 'point' ) {
 
 					const lone = primary.fingers.find( ( f ) => f.extended ) || primary.fingers[ 1 ];
-					cx = lone.x;
-					cy = lone.y;
+					rawCx = lone.x;
+					rawCy = lone.y;
 
 				} else if ( primary.posture === 'pinch' ) {
 
-					cx = 0.5 * ( primary.fingers[ 0 ].x + primary.fingers[ 1 ].x );
-					cy = 0.5 * ( primary.fingers[ 0 ].y + primary.fingers[ 1 ].y );
+					rawCx = 0.5 * ( primary.fingers[ 0 ].x + primary.fingers[ 1 ].x );
+					rawCy = 0.5 * ( primary.fingers[ 0 ].y + primary.fingers[ 1 ].y );
 
 				} else if ( primary.openCount >= 2 ) {
 
@@ -643,34 +777,36 @@ export function createHandInput() {
 					}
 					if ( n > 0 ) {
 
-						cx = primary.palmX * 0.35 + ( sx / n ) * 0.65;
-						cy = primary.palmY * 0.35 + ( sy / n ) * 0.65;
+						rawCx = primary.palmX * 0.45 + ( sx / n ) * 0.55;
+						rawCy = primary.palmY * 0.45 + ( sy / n ) * 0.55;
 
 					}
 
 				}
 
+				const cx = toScreenNormX( rawCx );
+				const cy = toScreenNormY( rawCy );
 				state.x = cx;
 				state.y = cy;
 				state.ndcX = cx * 2 - 1;
 				state.ndcY = 1 - cy * 2;
 
 				// Z-axis distance + posture drive pressure & touch area size
-				const zPressure = 0.65 + primary.proximity * 1.15; // 0.65x far -> 1.80x close
-				const zRadius = 0.72 + primary.proximity * 0.92;   // 0.72x far -> 1.64x close
+				const zPressure = 0.72 + primary.proximity * 1.15;
+				const zRadius = 0.78 + primary.proximity * 0.92;
 				const postureRadiusMul = primary.posture === 'point'
-					? 0.58
-					: ( primary.posture === 'open' ? 1.38 : ( primary.posture === 'pinch' ? 0.85 : 1.0 ) );
+					? 0.54
+					: ( primary.posture === 'open' ? 1.52 : ( primary.posture === 'pinch' ? 0.85 : 1.05 ) );
 
 				state.pressureScale = zPressure;
-				state.radiusScale = clamp( zRadius * postureRadiusMul, 0.45, 2.0 );
+				state.radiusScale = clamp( zRadius * postureRadiusMul, 0.45, 2.1 );
 
 				// Detect brisk open-hand wave/sweep for Frost Gust / Shake Off
 				if ( prevPrimaryX !== null && prevSampleSec !== null ) {
 
 					const dtS = Math.max( 1 / 120, tSec - prevSampleSec );
 					const speed = Math.hypot( cx - prevPrimaryX, cy - prevPrimaryY ) / dtS;
-					if ( primary.posture === 'open' && speed > 2.35 && ( nowMs - lastSweepMs ) > 1400 ) {
+					if ( ( primary.posture === 'open' || primary.posture === 'multi' ) && speed > 1.85 && ( nowMs - lastSweepMs ) > 1350 ) {
 
 						lastSweepMs = nowMs;
 						state.sweepTriggered = true;
@@ -682,15 +818,15 @@ export function createHandInput() {
 				prevPrimaryY = cy;
 				prevSampleSec = tSec;
 
-				// Collect up to 5 independently tracked active digits across 1–2 hands
+				// Collect up to 5 independently tracked active digits across 1–2 hands (cover-mapped!)
 				const digits = [];
 				for ( let hi = 0; hi < parsed.length; hi ++ ) {
 
 					const hd = parsed[ hi ];
 					if ( hd.posture === 'pinch' ) {
 
-						const mx = 0.5 * ( hd.fingers[ 0 ].x + hd.fingers[ 1 ].x );
-						const my = 0.5 * ( hd.fingers[ 0 ].y + hd.fingers[ 1 ].y );
+						const mx = toScreenNormX( 0.5 * ( hd.fingers[ 0 ].x + hd.fingers[ 1 ].x ) );
+						const my = toScreenNormY( 0.5 * ( hd.fingers[ 0 ].y + hd.fingers[ 1 ].y ) );
 						digits.push( {
 							id: `h${ hi }_pinch`,
 							x: mx,
@@ -698,20 +834,22 @@ export function createHandInput() {
 							ndcX: mx * 2 - 1,
 							ndcY: 1 - my * 2,
 							proximity: hd.proximity,
-							pressure: ( 0.85 + hd.proximity * 1.05 ) * 1.25,
+							pressure: ( 0.9 + hd.proximity * 1.05 ) * 1.25,
 							radiusMul: 0.75 + hd.proximity * 0.45
 						} );
 
 					} else if ( hd.posture === 'fist' ) {
 
+						const px = toScreenNormX( hd.palmX );
+						const py = toScreenNormY( hd.palmY );
 						digits.push( {
 							id: `h${ hi }_fist`,
-							x: hd.palmX,
-							y: hd.palmY,
-							ndcX: hd.palmX * 2 - 1,
-							ndcY: 1 - hd.palmY * 2,
+							x: px,
+							y: py,
+							ndcX: px * 2 - 1,
+							ndcY: 1 - py * 2,
 							proximity: hd.proximity,
-							pressure: ( 0.9 + hd.proximity * 1.15 ) * 1.2,
+							pressure: ( 0.95 + hd.proximity * 1.1 ) * 1.2,
 							radiusMul: 1.15 + hd.proximity * 0.55
 						} );
 
@@ -721,15 +859,17 @@ export function createHandInput() {
 
 							if ( ! f.extended ) continue;
 							if ( digits.length >= 5 ) break;
+							const sx = toScreenNormX( f.x );
+							const sy = toScreenNormY( f.y );
 							digits.push( {
 								id: `h${ hi }_${ f.name }`,
-								x: f.x,
-								y: f.y,
-								ndcX: f.ndcX,
-								ndcY: f.ndcY,
+								x: sx,
+								y: sy,
+								ndcX: sx * 2 - 1,
+								ndcY: 1 - sy * 2,
 								proximity: hd.proximity,
-								pressure: 0.70 + hd.proximity * 1.05,
-								radiusMul: hd.posture === 'point' ? ( 0.55 + hd.proximity * 0.45 ) : ( 0.75 + hd.proximity * 0.55 )
+								pressure: 0.95 + hd.proximity * 1.15,
+								radiusMul: hd.posture === 'point' ? ( 0.50 + hd.proximity * 0.45 ) : ( 0.85 + hd.proximity * 0.65 )
 							} );
 
 						}
@@ -738,8 +878,24 @@ export function createHandInput() {
 
 				}
 
+				// Safety guarantee: a detected hand always drives at least its palm centroid
+				if ( digits.length === 0 ) {
+
+					digits.push( {
+						id: 'h0_palm',
+						x: cx,
+						y: cy,
+						ndcX: state.ndcX,
+						ndcY: state.ndcY,
+						proximity: primary.proximity,
+						pressure: 0.95 + primary.proximity * 1.1,
+						radiusMul: 1.0 + primary.proximity * 0.5
+					} );
+
+				}
+
 				state.digits = digits;
-				drawConstellation( parsed );
+				drawAmbientStageOverlay( parsed );
 
 			} else if ( ( nowMs - lastHandSeenMs ) > 260 ) {
 
@@ -752,9 +908,20 @@ export function createHandInput() {
 				lastPinchEdge = false;
 				prevPrimaryX = null;
 				prevPrimaryY = null;
-				drawConstellation( null );
+				lastParsedHands = [];
+				drawAmbientStageOverlay( null );
+
+			} else {
+
+				// Keep ambient camera veil alive smoothly between hand detections
+				drawAmbientStageOverlay( lastParsedHands );
 
 			}
+
+		} else if ( stageCtx && video && video.readyState >= 2 ) {
+
+			// Keep ambient ghost-glass camera reflection rendering smoothly at display refresh rate
+			drawAmbientStageOverlay( lastParsedHands );
 
 		}
 

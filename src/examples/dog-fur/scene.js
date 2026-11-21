@@ -173,8 +173,16 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 		}
 
 		// Graceful fallback across the sunlit top silhouette crest so sweeping fingers
-		// right along the glowing ridge still brushes those backlit guard hairs!
+		// (or upright open webcam fingertips) right along the glowing ridge still brush the fur!
 		if ( raycaster.ray.intersectPlane( fallbackPlane, hitScratch ) ) {
+
+			if ( hitScratch.y > 0.44 ) {
+
+				const uClamp = THREE.MathUtils.clamp( hitScratch.x / 2.25, - 0.92, 0.92 );
+				evalDogSurface( uClamp, 0.72, out, autoNorm, null );
+				return true;
+
+			}
 
 			out.copy( hitScratch );
 			return true;
@@ -786,6 +794,7 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 					handsControlling = false;
 					targetRadiusScale = 1.0;
 					fur.setTouchPressure( userPressureSetting );
+					if ( liveBreathEnergy < 0.01 ) fur.setBreathWind( 0, 0 );
 					for ( const id of activeHandIds ) releaseSlot( id );
 					activeHandIds.clear();
 
@@ -800,8 +809,18 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 			// Z-axis distance to camera & single-finger vs. open-palm scale pressure & touch area size
 			fur.setTouchPressure( THREE.MathUtils.clamp( userPressureSetting * hand.pressureScale, 0.35, 2.2 ) );
 			targetRadiusScale = hand.posture === 'point'
-				? THREE.MathUtils.clamp( 0.52 + hand.proximity * 0.45, 0.48, 1.15 )
-				: THREE.MathUtils.clamp( 0.72 + hand.proximity * 0.72, 0.65, 1.65 );
+				? THREE.MathUtils.clamp( 0.48 + hand.proximity * 0.42, 0.45, 1.05 )
+				: ( hand.posture === 'open'
+					? THREE.MathUtils.clamp( 0.85 + hand.proximity * 0.78, 0.75, 1.75 )
+					: THREE.MathUtils.clamp( 0.75 + hand.proximity * 0.70, 0.65, 1.65 ) );
+
+			// Subtle warm palm-breeze wake when holding an open hand close to the coat
+			if ( liveBreathEnergy < 0.05 ) {
+
+				const palmBreeze = hand.posture === 'open' ? ( 0.14 + hand.proximity * 0.28 ) : 0;
+				fur.setBreathWind( palmBreeze, hand.ndcX );
+
+			}
 
 			if ( hand.sweepTriggered ) {
 
@@ -810,11 +829,22 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 
 			}
 
-			// Map up to 5 independently tracked extended digits simultaneously across slots 0..4!
-			const seenThisFrame = new Set();
+			// Release stale hand digit IDs FIRST so fist -> 5-finger open transitions never starve slots!
+			const nextIds = new Set( hand.digits.map( ( d ) => d.id ) );
+			for ( const id of activeHandIds ) {
+
+				if ( ! nextIds.has( id ) ) {
+
+					releaseSlot( id );
+					activeHandIds.delete( id );
+
+				}
+
+			}
+
+			// Map up to 5 independently tracked extended digits simultaneously across slots 0..4
 			for ( const d of hand.digits ) {
 
-				seenThisFrame.add( d.id );
 				activeHandIds.add( d.id );
 				const slot = acquireSlot( d.id, false );
 				if ( ! slot ) continue;
@@ -836,17 +866,6 @@ export async function createDogFurExperience( { container, config = DOG_FUR_CONF
 					slot.pressure = d.pressure;
 					hasUserInteracted = true;
 					lastInteractElapsed = elapsedNow;
-
-				}
-
-			}
-
-			for ( const id of activeHandIds ) {
-
-				if ( ! seenThisFrame.has( id ) ) {
-
-					releaseSlot( id );
-					activeHandIds.delete( id );
 
 				}
 
